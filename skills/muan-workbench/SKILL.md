@@ -101,18 +101,23 @@ io.open(p,'wb').write(raw.replace('\n','\r\n').encode('utf-8'))
 ### 8.0 安装本 skill（给 agent 使用者）
 把整个 `muan-workbench/` 目录放入 `~/.workbuddy/skills/`（用户级）或项目 `.workbuddy/skills/`。之后在对话中说「帮我配置木案工作台 / 双端同步怎么弄」，agent 会加载本手册并照 §8 引导。
 
-### 8.1 电脑端：跑起本地服务
-1. 安装 Node.js（≥18）。
-2. 克隆仓库后在 `<repo>/app` 执行 `node server.js`（默认端口 8765）。
-3. 浏览器打开 `http://localhost:8765` —— 数据自动存入本机 `data/muan.db.json`。
-4. 局域网应急：同一 WiFi 下手机访问 `http://<电脑局域网IP>:8765`（临时用，正式请走云同步）。
+### 8.1 电脑端安装（Windows / macOS / Linux）—— 详细分步
+给用户逐步照做；出现任何一步失败先按 §9/FAQ 排查：
+1. **拿代码**：`git clone <仓库>` 或 GitHub `Code → Download ZIP` 解压。
+2. **装 Node.js（一次性）**：Windows 到 nodejs.org 下载 LTS .msi 安装；macOS `brew install node`；Linux 用系统包管理器。验证：终端 `node -v` 输出 v18+。
+3. **一键启动**：
+   - Windows：双击仓库根 `start-muan.bat`（黑窗口**不能关**；2 秒后自动开浏览器；控制台打印 `MUAN_LISTENING=端口`，8765 被占会自动递增）。
+   - macOS/Linux：`chmod +x start-muan.sh && ./start-muan.sh`。
+4. **验证**：浏览器打开 `http://localhost:8765/`，见「木案 · 个人工作台」并能新增数据即成功（数据存 `app/data/muan.db.json`）。
+5. **（可选）电脑端也装成桌面应用**：Chrome/Edge 打开 localhost 页面 → 地址栏「安装」图标或菜单 ⋮ →「安装 木案」→ 桌面/开始菜单出图标，无地址栏窗口（仍需先启动服务）。
+6. 局域网应急：同 WiFi 手机访问 `http://<电脑局域网IP>:8765`（临时；正式请走 §8.3 云同步 + §8.2 PWA）。
 
-### 8.2 手机端：安装 PWA
-1. 需要一个 HTTPS 线上地址（把仓库 `app/` 目录整体发布到 CloudStudio/任意静态托管）。
-2. 手机浏览器打开线上地址 → 「更多」页顶部一行安装提示：
-   - 安卓：浏览器菜单 →「安装应用」
-   - iPhone：Safari 分享 →「添加到主屏幕」
-3. 从桌面图标进入即全屏独立 App；Service Worker 保证离线也能打开已缓存页面。
+### 8.2 手机端安装（PWA）—— 详细分步
+前置：把仓库 `app/` 目录**整体**发布到任意 HTTPS 静态托管（CloudStudio / Netlify Drop / GitHub Pages 均可；app/ 已含离线壳全部文件，无需构建）。
+1. **iPhone / iPad（必须用 Safari）**：打开线上地址 → 底部「分享」（方框+↑）→「添加到主屏幕」→ 确认「木案」→ 右上「添加」。完成后桌面图标即全屏 App。
+2. **Android**：Chrome 右上 ⋮ →「安装应用」/「添加到主屏幕」；Edge 右上 ⋯ →「添加到手机 → 安装应用」；地址栏若出现 ⊕/「安装」图标可直点。完成后桌面图标全屏运行。
+3. **验证**：桌面图标名「木案」、打开无地址栏、断网可开已缓存页、顶栏为米色药丸+墨绿木桌图标。
+4. 提示文案：网页内「更多」页顶部有安装方法一行；iPhone 装完从桌面进入即独立 App。
 
 ### 8.3 双端同步（Supabase）—— 每台设备都要做的四步
 1. **建项目**：supabase.com 免费注册 → 新建项目。

@@ -40,6 +40,10 @@ muan-workbench/
 
 ## 快速开始（面向终端用户）
 
+完整分 OS 的**详细安装手册**（电脑端 Windows/macOS/Linux、手机端 iPhone/安卓、一键启动脚本 `start-muan.bat` / `.sh`、可选电脑桌面应用）见仓库顶层 `README.md` 的「📖 安装手册」章节。
+
+> 若本 skill 单独分发（不在 muan-workbench 仓库内），电脑端/手机端的分步安装文字以 `SKILL.md` 第 8 节为准，把 `<repo>` 替换为实际源码目录即可。
+
 1. **电脑端**：`node server.js` → 打开 `http://localhost:8765`
 2. **手机端**：把 `site/` 发布到 HTTPS 静态托管 → 手机访问并「添加到主屏幕」
 3. **双端同步**：新建 Supabase 项目 → SQL Editor 执行 `references/supabase-setup.sql`（可选再执行 v3 开 AI）→ 各设备在「我的 → 数据与同步」填 Project URL + Publishable Key → 登录同一账号
