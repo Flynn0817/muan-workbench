@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="木案 应用图标">
+  <rect width="512" height="512" rx="112" fill="#f5f1e8"/>
+  <!-- 案几 -->
+  <rect x="110" y="300" width="292" height="30" rx="15" fill="#2f4f3e"/>
+  <rect x="140" y="330" width="22" height="98" rx="11" fill="#2f4f3e"/>
+  <rect x="350" y="330" width="22" height="98" rx="11" fill="#2f4f3e"/>
+  <!-- 小树（案上木） -->
+  <rect x="246" y="205" width="14" height="98" rx="7" fill="#2f4f3e"/>
+  <ellipse cx="220" cy="238" rx="36" ry="19" fill="#6b8f71" transform="rotate(-34 220 238)"/>
+  <ellipse cx="286" cy="238" rx="36" ry="19" fill="#6b8f71" transform="rotate(34 286 238)"/>
+  <circle cx="253" cy="204" r="13" fill="#6b8f71"/>
+  <!-- 木币金点缀 -->
+  <circle cx="382" cy="166" r="30" fill="#c9a227"/>
+  <circle cx="382" cy="166" r="20" fill="none" stroke="#f5f1e8" stroke-width="4"/>
+  <path d="M382 154 l0 24 M370 166 l24 0" stroke="#f5f1e8" stroke-width="4" stroke-linecap="round"/>
+</svg>
