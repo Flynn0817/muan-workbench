@@ -112,6 +112,20 @@ io.open(p,'wb').write(raw.replace('\n','\r\n').encode('utf-8'))
 5. **（可选）电脑端也装成桌面应用**：Chrome/Edge 打开 localhost 页面 → 地址栏「安装」图标或菜单 ⋮ →「安装 木案」→ 桌面/开始菜单出图标，无地址栏窗口（仍需先启动服务）。
 6. 局域网应急：同 WiFi 手机访问 `http://<电脑局域网IP>:8765`（临时；正式请走 §8.3 云同步 + §8.2 PWA）。
 
+#### 8.1.1 预置背景图（4 张，开箱即用）
+工作台内置 4 张主题背景图（用于「我的 → 外观设置 → 主题氛围」），已随仓库一起发布在 `app/data/`：
+- `data/forest-hero.jpg`（默认 · 林间晨光）
+- `data/bg-blue.png`（蓝调）
+- `data/bg-ochre.png`（赭石）
+- `data/bg-violet.png`（紫调）
+
+**首次 clone 后若发现背景图缺失**，原因多为 `.gitignore`/`.zip` 过滤了 `app/data/` 下的图片；处理方法：
+1. 确认这 4 个文件存在于 `app/data/`（不是被 `.gitignore` 排除或被 zip 漏打包）。
+2. 若确实缺，从仓库重新拉取（`git pull`）或解压完整 zip；不要把它们移到别处，否则 `data/<file>` 的相对路径会失效。
+3. `server.js` 把 `app/data/` 作为静态目录暴露，前端 CSS 直接以 `data/forest-hero.jpg` 等相对路径引用，**别改成绝对路径或外链**。
+
+用户在「我的 → 外观设置」上传的自定义背景存 `app/data/muan.db.json`（base64 内嵌字段），与上面 4 张预置图互不干扰。
+
 ### 8.2 手机端安装（PWA）—— 详细分步
 前置：把仓库 `app/` 目录**整体**发布到任意 HTTPS 静态托管（CloudStudio / Netlify Drop / GitHub Pages 均可；app/ 已含离线壳全部文件，无需构建）。
 1. **iPhone / iPad（必须用 Safari）**：打开线上地址 → 底部「分享」（方框+↑）→「添加到主屏幕」→ 确认「木案」→ 右上「添加」。完成后桌面图标即全屏 App。
