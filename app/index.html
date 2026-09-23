@@ -1444,6 +1444,56 @@ input:focus, select:focus, textarea:focus{
 /* ===== 内嵌 PDF 阅读器 ===== */
 .pdf-bar{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
 .pdf-stage{background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:2px;min-height:180px;max-height:64vh;overflow:auto;display:flex;align-items:flex-start;justify-content:center}
+/* ===== 科研页布局优化（2026-09-23 二版） ===== */
+/* AI 入口条：细，不占地方 */
+.res-ai-bar{display:flex;align-items:center;gap:8px;background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:7px 10px;margin-bottom:10px;font-size:12.5px;cursor:default}
+.res-ai-bar .btn{flex:none}
+.res-ai-bt{font-weight:600;color:var(--ink);flex:none}
+.res-ai-bn{color:var(--ink-soft);font-size:11.5px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.res-ai-dot{width:7px;height:7px;border-radius:50%;background:var(--accent);display:inline-block;flex:none}
+.res-ai-dot.busy{animation:resAiPulse 1s ease-in-out infinite}
+@keyframes resAiPulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.7)}}
+/* 弹窗内的对话 */
+.res-ai-modal-h{display:flex;align-items:center;gap:8px;font-size:11.5px;margin-bottom:8px;flex-wrap:wrap}
+.res-ai-x{font-size:11.5px;color:var(--accent);cursor:pointer;font-weight:600}
+.res-ai-log{max-height:44vh;min-height:120px;overflow:auto;display:flex;flex-direction:column;gap:7px;padding:2px 0}
+.res-ai-msg{font-size:13px;line-height:1.75;padding:8px 11px;border-radius:10px;max-width:94%}
+.res-ai-msg.user{align-self:flex-end;background:var(--accent);color:#fff}
+.res-ai-msg.bot{align-self:flex-start;background:var(--surface-2);border:1px solid var(--line)}
+.res-ai-in{display:flex;gap:8px;align-items:flex-end;margin-top:10px}
+.res-ai-in textarea{flex:1;min-width:0;font-size:13.5px;resize:none;max-height:130px;line-height:1.6}
+/* 筛选折叠摘要 */
+.lit-fbar{display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap}
+.lit-flab{flex:none;font-size:11px;color:var(--ink-soft);letter-spacing:.5px}
+.lit-fsum{flex:1;min-width:0;font-size:12px;color:var(--ink);background:var(--surface-2);border:1px solid var(--line);border-radius:9px;padding:6px 10px;cursor:pointer;display:flex;align-items:center;gap:8px}
+.lit-ftog{margin-left:auto;color:var(--accent);font-weight:600;font-size:11.5px;flex:none}
+/* 多选工具条 */
+.lit-selbar{display:flex;align-items:center;gap:6px;flex-wrap:wrap;background:color-mix(in srgb,var(--accent) 9%,var(--surface));border:1px solid color-mix(in srgb,var(--accent) 26%,transparent);border-radius:10px;padding:7px 10px;margin-bottom:9px}
+.lit-selbar-n{font-size:12px;color:var(--ink);flex:none}
+.lit-selbar-n b{font-size:14px;color:var(--accent)}
+.lit-selbar-sp{flex:1;min-width:0}
+.lit-selbar-del{color:var(--red);border-color:color-mix(in srgb,var(--red) 40%,transparent)}
+.lit-bigchip{padding:9px 16px;font-size:13.5px}
+/* 勾选态 */
+.lit-pick{flex:none;width:22px;height:22px;margin:0 10px 0 2px;border-radius:7px;border:1.5px solid var(--line);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:#fff;background:var(--surface);align-self:flex-start;margin-top:2px}
+.lit-pick.on{background:var(--accent);border-color:var(--accent)}
+.lit-card.picked{background:color-mix(in srgb,var(--accent) 7%,transparent);border-radius:12px}
+.lit-list.selmode .lit-card .item{cursor:pointer}
+/* 列表项：摘要两行截断，读起来不啰嗦 */
+.lit-abst{font-size:12px;line-height:1.65;color:var(--ink-soft);margin-top:4px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+/* 详情的正文排版：给足行高与字号，长文能读 */
+.lit-read{display:grid;grid-template-columns:1fr;gap:16px;margin:12px 0 4px}
+.lit-read .lit-dim{border-left:2.5px solid var(--accent-soft);padding:2px 0 2px 12px}
+.lit-read .lit-dim-h{font-size:12px;letter-spacing:.6px;margin-bottom:5px}
+.lit-read .lit-dim-b{font-size:13.5px;line-height:1.85;color:var(--ink)}
+.lit-read .lit-dim.empty{border-left-color:var(--line)}
+.lit-metabox{margin-top:16px;padding-top:12px;border-top:1px dashed var(--line)}
+.lit-foot{margin-top:10px;font-size:11px;color:var(--ink-soft);line-height:1.7}
+.lit-btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+@media(min-width:769px){
+  .lit-read{grid-template-columns:1fr 1fr;gap:18px 26px}
+}
+.lit-tagline{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
 </style>
 </head>
 <body>
@@ -2692,6 +2742,7 @@ function aiRender(){
   const ta=document.getElementById('aiText');
   if(ta)autoGrow(ta);
   resAiRender();
+  resAiBarRender();
 }
 function setAiThinking(b){const t=document.getElementById('aiThinking');if(t)t.style.display=b?'block':'none';const btn=document.getElementById('aiSendBtn');if(btn)btn.disabled=b;}
 const AI_CFG_DEF={base:'https://api.deepseek.com',model:'deepseek-chat'};
@@ -3893,7 +3944,7 @@ function renderResearch(){
 : researchTab==='incubator'?renderResearchIncubator()
 : researchTab==='journals'?renderJournalRadar()
 : renderResearchClassics();
-  return `<div class="rtabs">${tabs.map(t=>`<div class="rtab ${researchTab===t[0]?'active':''}" data-action="research-tab" data-t="${t[0]}">${t[1]}</div>`).join('')}</div><div id="resAiBox">${resAiPanelHtml()}</div>${body}`;
+  return `<div class="rtabs">${tabs.map(t=>`<div class="rtab ${researchTab===t[0]?'active':''}" data-action="research-tab" data-t="${t[0]}">${t[1]}</div>`).join('')}</div><div id="resAiBar">${resAiBarHtml()}</div>${body}`;
 }
 /* 里程碑到期提示：返回如「剩3天 / 今天到期 / 已逾期2天」的内联 HTML；已完成或无截止返回空 */
 function msDueHtml(m){
@@ -4356,6 +4407,99 @@ async function litImportRun(){
   toast('导入完成：成功 '+ok+' 篇'+(fail?('，失败 '+fail+' 篇'):''),fail?'warn':'gold');
 }
 /* ---------- 列表与详情 ---------- */
+/* ===== 文献列表 / 多选管理 / 阅读排版 ===== */
+let litSelOn=false;
+let litSel=[];
+let litVisibleIds=[];
+let litFilterOpen=false;
+function litSelHas(id){return litSel.indexOf(id)>=0;}
+function litSelCount(){return litSel.length;}
+function litRemoveMany(ids){
+  const R=state.research;
+  let xp=0;
+  (ids||[]).forEach(function(id){
+    const i=R.papers.findIndex(function(p){return p.id===id;});
+    if(i<0)return;
+    xp+=(R.papers[i].xp||0);
+    R.papers.splice(i,1);
+  });
+  if(xp)removeXP(xp);
+  save();renderView();checkAch();
+}
+/* 选中工具条：只在多选模式出现；批量动作都走这里 */
+function litSelBarHtml(visibleIds){
+  if(!litSelOn)return '';
+  const n=litSelCount();
+  const dis=n?'':' disabled';
+  const visN=(visibleIds||[]).length;
+  const allPicked=visN>0&&visibleIds.every(litSelHas);
+  return '<div class="lit-selbar">'
+    +'<span class="lit-selbar-n">已选 <b>'+n+'</b> 篇</span>'
+    +'<button class="btn ghost sm" data-action="lit-sel-all">'+(allPicked?'取消全选':'全选本页 '+visN+' 篇')+'</button>'
+    +'<button class="btn ghost sm" data-action="lit-sel-none"'+dis+'>清空</button>'
+    +'<span class="lit-selbar-sp"></span>'
+    +'<button class="btn ghost sm" data-action="lit-sel-status"'+dis+'>改状态</button>'
+    +'<button class="btn ghost sm" data-action="lit-sel-tag"'+dis+'>加标签</button>'
+    +'<button class="btn ghost sm" data-action="lit-sel-cite"'+dis+'>复制引文</button>'
+    +'<button class="btn ghost sm lit-selbar-del" data-action="lit-sel-del"'+dis+'>删除</button>'
+    +'</div>';
+}
+function litSelStatusModal(){
+  if(!litSelCount())return;
+  openModal('批量改阅读状态','<div class="muted" style="font-size:12px;line-height:1.7;margin-bottom:10px">把选中的 <b>'+litSelCount()+'</b> 篇设为：</div>'
+    +'<div class="insp-chips">'+LIT_STATUS.map(function(s){return '<span class="insp-chip lit-bigchip" data-action="lit-sel-status-set" data-s="'+s+'">'+s+'</span>';}).join('')+'</div>'
+    +'<div class="muted" style="font-size:11px;margin-top:12px">设为「已读」时，会把这几篇的阅读进度补到 100%。</div>');
+}
+function litSelStatusSet(s){
+  const R=state.research;
+  litSel.forEach(function(id){
+    const p=R.papers.filter(function(x){return x.id===id;})[0];
+    if(!p)return;
+    p.status=s;
+    if(s==='已读'&&(+p.progress||0)<100)p.progress=100;
+  });
+  const n=litSelCount();
+  closeModal();save();renderView();
+  toast('已把 '+n+' 篇设为「'+s+'」','gold');
+}
+function litSelTagModal(){
+  if(!litSelCount())return;
+  openModal('批量加标签','<div class="muted" style="font-size:12px;line-height:1.7;margin-bottom:10px">给选中的 <b>'+litSelCount()+'</b> 篇追加标签，已有的不会重复。留空则不改那一项。</div>'
+    +'<label class="fld">分类标签（逗号分隔）</label><input id="m_btags" placeholder="如：国际传播, 媒介研究"/>'
+    +'<label class="fld">理论视角标签（逗号分隔）</label><input id="m_btth" placeholder="如：框架理论, 议程设置理论"/>'
+    +'<button class="btn" style="margin-top:12px" data-action="lit-sel-tag-save">应用到 '+litSelCount()+' 篇</button>');
+}
+function litSelTagSave(){
+  const grab=function(id){return String((document.getElementById(id)||{}).value||'').split(/[,，、;；|]+/).map(function(s){return s.trim();}).filter(Boolean);};
+  const t1=grab('m_btags'), t2=grab('m_btth');
+  if(!t1.length&&!t2.length){toast('两个都没填','warn');return;}
+  const R=state.research;
+  litSel.forEach(function(id){
+    const p=R.papers.filter(function(x){return x.id===id;})[0];
+    if(!p)return;
+    if(t1.length){const m=litTags(p,'tags').concat(t1);p.tags=m.filter(function(s,i){return s&&m.indexOf(s)===i;}).join(', ');}
+    if(t2.length){const m=litTags(p,'theoryTags').concat(t2);p.theoryTags=m.filter(function(s,i){return s&&m.indexOf(s)===i;});}
+  });
+  const n=litSelCount();
+  closeModal();save();renderView();
+  toast('已给 '+n+' 篇加标签','gold');
+}
+function litSelCite(){
+  const R=state.research;
+  const lines=R.papers.filter(function(p){return litSelHas(p.id);}).map(apaCite).filter(Boolean);
+  if(!lines.length){toast('选中的文献都缺作者和标题，拼不出引文','warn');return;}
+  copyText(lines.join('\n'),'已复制 '+lines.length+' 条引文（APA 7）');
+}
+function litSelDel(){
+  const n=litSelCount();
+  if(!n)return;
+  askConfirm('批量删除','将删除选中的 <b>'+n+'</b> 篇文献记录，不可恢复。请在勾选前确认清楚。',function(){
+    const ids=litSel.slice();
+    litSel=[];
+    litRemoveMany(ids);
+    toast('已删除 '+n+' 篇','gold');
+  });
+}
 function litDimHtml(p,d){
   const v=String(p[d[0]]||'').trim();
   if(!v)return '<div class="lit-dim empty"><div class="lit-dim-h">'+d[1]+'<span class="lit-dim-tag">未分析</span></div></div>';
@@ -4368,12 +4512,14 @@ function litViewChipsHtml(all){
     return '<span class="insp-chip '+(litView===v[0]?'active':'')+'" data-action="research-lit-view" data-v="'+v[0]+'">'+v[1]+' '+n+'</span>';
   }).join('');
 }
+/* 列表里的一行。多选模式下：整行点击=勾选，不再展开，也不显示删除键（避免误删） */
 function paperItemHtml(p){
-  const open=litOpen===p.id;
-  const dims=LIT_DIMS.map(function(d){return litDimHtml(p,d);}).join('');
+  const on=litSelOn;
+  const picked=on&&litSelHas(p.id);
+  const open=!on&&litOpen===p.id;
+  const done=litDimFilled(p);
   const tt=litTags(p,'theoryTags'), tg=litTags(p,'tags');
   const cite=apaCite(p);
-  const done=litDimFilled(p);
   const meta=p.aiMeta||null;
   let detail='';
   if(open){
@@ -4382,31 +4528,35 @@ function paperItemHtml(p){
     }).join('');
     detail='<div class="lit-detail">'
       +(done===0?('<div class="lit-empty-hint">这篇还没做精读。点下面「AI 六维分析」，会自动读取 PDF 正文并生成六项；扫描版 PDF 可用「粘贴正文」。</div>'):'')
-      +'<div class="lit-dims">'+dims+'</div>'
-      +'<div class="lit-row"><span class="lit-flab2">阅读状态</span><div class="insp-chips" style="margin:0">'+stChips+'</div></div>'
-      +(tt.length?('<div class="lit-row"><span class="lit-flab2">理论视角标签</span><div class="lit-tags">'+tt.map(function(t){return '<span class="tag accent">'+esc(t)+'</span>';}).join(' ')+'</div></div>'):'')
-      +(p.note?('<div class="lit-row"><span class="lit-flab2">阅读笔记</span><div class="lit-note">'+esc(p.note).replace(/\n/g,'<br>')+'</div></div>'):'')
-      +(cite?('<div class="lit-row"><span class="lit-flab2">引用格式</span><div class="lit-cite"><code>'+esc(cite)+'</code><span class="lit-copy" data-action="lit-copy-cite" data-id="'+p.id+'">复制</span></div></div>'):'')
-      +'<div class="lit-row"><span class="lit-flab2">原件</span><div>'+(p.file?('<a class="muted" href="'+esc(litFileUrl(p.file))+'" target="_blank" rel="noopener">'+esc(String(p.file).replace(/^data\/media\//,''))+'</a>'):('<span class="muted">未保存</span>'+(p.srcName?(' · 原始文件名 '+esc(p.srcName)):'')))+'</div></div>'
       +'<div class="lit-acts">'
-      +'<button class="btn sm" data-action="lit-read" data-id="'+p.id+'">阅读</button>'
+      +'<button class="btn sm" data-action="lit-read" data-id="'+p.id+'">阅读原文</button>'
       +'<button class="btn sm" data-action="lit-analyze" data-id="'+p.id+'">AI 六维分析</button>'
       +'<button class="btn ghost sm" data-action="lit-paste" data-id="'+p.id+'">粘贴正文</button>'
       +'<button class="btn ghost sm" data-action="edit" data-coll="research.papers" data-id="'+p.id+'">编辑</button>'
+      +'</div>'
+      +'<div class="lit-read">'+LIT_DIMS.map(function(d){return litDimHtml(p,d);}).join('')+'</div>'
+      +'<div class="lit-metabox">'
+      +'<div class="lit-row"><span class="lit-flab2">阅读状态</span><div class="insp-chips" style="margin:0">'+stChips+'</div></div>'
+      +(tt.length?('<div class="lit-row"><span class="lit-flab2">理论视角</span><div class="lit-tags">'+tt.map(function(t){return '<span class="tag accent">'+esc(t)+'</span>';}).join(' ')+'</div></div>'):'')
+      +(tg.length?('<div class="lit-row"><span class="lit-flab2">分类标签</span><div class="lit-tags">'+tg.map(function(t){return '<span class="tag gold">'+esc(t)+'</span>';}).join(' ')+'</div></div>'):'')
+      +(p.note?('<div class="lit-row"><span class="lit-flab2">阅读笔记</span><div class="lit-note">'+esc(p.note).replace(/\n/g,'<br>')+'</div></div>'):'')
+      +(cite?('<div class="lit-row"><span class="lit-flab2">引用格式</span><div class="lit-cite"><code>'+esc(cite)+'</code><span class="lit-copy" data-action="lit-copy-cite" data-id="'+p.id+'">复制</span></div></div>'):'')
+      +'<div class="lit-row"><span class="lit-flab2">原件</span><div>'+(p.file?('<a class="muted" href="'+esc(litFileUrl(p.file))+'" target="_blank" rel="noopener">'+esc(String(p.file).replace(/^data\/media\//,''))+'</a>'):('<span class="muted">未保存</span>'+(p.srcName?(' · 原始文件名 '+esc(p.srcName)):'')))+'</div></div>'
       +'</div>'
       +'<div class="lit-anote" id="litAnote_'+p.id+'"></div>'
       +(meta?('<div class="muted" style="font-size:11px;margin-top:8px">上次解读 '+esc(litTimeStr(meta.at))+' · 依据正文 '+meta.chars+' 字'+(meta.pages?('（'+meta.pages+' 页）'):'')+(meta.truncated?(' · 正文较长，只取了前 '+LIT_TEXT_MAX+' 字'):'')+'</div>'):'')
       +'</div>';
   }
-  return '<div class="lit-card'+(open?' open':'')+'">'
-    +'<div class="item"><div class="body" data-action="lit-toggle" data-id="'+p.id+'" style="cursor:pointer">'
-    +'<div class="title">'+(open?'▾ ':'▸ ')+esc(p.title||'')+(done>=6?' <span class="tag green">已精读</span>':'')+'</div>'
-    +'<div class="meta">'+esc(p.author||'')+(p.year?(' · '+esc(p.year)):'')+(p.venue?(' · '+esc(p.venue)):'')+' <span class="tag">'+esc(p.status||'待读')+'</span>'+(p.cited?'<span class="tag gold">已引用</span>':'')+(done?'<span class="tag accent">六维 '+done+'/6</span>':'')+(p.file?'':'<span class="tag warn">无原件</span>')+'</div>'
-    +(tt.length?('<div class="meta">'+tt.map(function(t){return '<span class="tag accent">'+esc(t)+'</span>';}).join(' ')+'</div>'):'')
-    +((!open&&tg.length)?('<div class="meta">'+tg.map(function(t){return '<span class="tag gold">'+esc(t)+'</span>';}).join(' ')+'</div>'):'')
-    +((!open&&String(p.abstract||'').trim())?('<div class="meta">'+esc(String(p.abstract).slice(0,70))+'…</div>'):'')
+  return '<div class="lit-card'+(open?' open':'')+(picked?' picked':'')+'">'
+    +'<div class="item">'
+    +(on?('<span class="lit-pick'+(picked?' on':'')+'" data-action="lit-pick" data-id="'+p.id+'" role="checkbox" aria-checked="'+(picked?'true':'false')+'">'+(picked?'✓':'')+'</span>'):'')
+    +'<div class="body" data-action="'+(on?'lit-pick':'lit-toggle')+'" data-id="'+p.id+'" style="cursor:pointer">'
+    +'<div class="title">'+(on?'':(open?'▾ ':'▸ '))+esc(p.title||'')+(done>=6?' <span class="tag green">已精读</span>':'')+'</div>'
+    +'<div class="meta">'+esc(p.author||'')+(p.year?(' · '+esc(p.year)):'')+(p.venue?(' · '+esc(p.venue)):'')+' <span class="tag">'+esc(p.status||'待读')+'</span>'+(p.cited?'<span class="tag gold">已引用</span>':'')+((done>0&&done<6)?('<span class="tag accent">六维 '+done+'/6</span>'):'')+(p.file?'':'<span class="tag warn">无原件</span>')+'</div>'
+    +((!open&&(tt.length||tg.length))?('<div class="meta lit-tagline">'+tt.map(function(t){return '<span class="tag accent">'+esc(t)+'</span>';}).join(' ')+tg.map(function(t){return '<span class="tag gold">'+esc(t)+'</span>';}).join(' ')+'</div>'):'')
+    +((!open&&String(p.abstract||'').trim())?('<div class="lit-abst">'+esc(String(p.abstract))+'</div>'):'')
     +'</div>'
-    +'<button class="mini-btn" data-action="del" data-coll="research.papers" data-id="'+p.id+'">'+ico('trash')+'</button>'
+    +(on?'':('<button class="mini-btn" data-action="del" data-coll="research.papers" data-id="'+p.id+'">'+ico('trash')+'</button>'))
     +'</div>'+detail+'</div>';
 }
 function renderLitCite(all,q){
@@ -4419,7 +4569,7 @@ function renderLitCite(all,q){
     +'<div class="row" style="gap:8px;margin-bottom:8px"><input id="lit_q" class="fld" style="flex:1;font-size:12.5px" placeholder="检索…" value="'+esc(litQ||'')+'"/><button class="btn sm" data-action="research-lit-q">检索</button></div>'
     +'<div class="lit-fbar"><span class="lit-flab">视图</span><div class="insp-chips">'+litViewChipsHtml(all)+'</div></div>'
     +rows
-    +'<div class="muted" style="margin-top:8px;font-size:11px">按「作者 (年份). 标题. 来源.」拼装，缺哪个字段就跳过哪个。点「复制」拿纯文本引文，直接粘进 Word 或笔记。</div></div>';
+    +'<div class="muted" style="margin-top:8px;font-size:11px">按「作者 (年份). 标题. 来源.」拼装，缺哪个字段就跳过哪个。点「复制」拿纯文本引文，可直接粘进 Word 或笔记。</div></div>';
 }
 function renderResearchLiterature(){
   const R=state.research, all=R.papers||[];
@@ -4430,64 +4580,93 @@ function renderResearchLiterature(){
   if(vDef[0]!=='all')list=list.filter(vDef[2]);
   if(litFilter!=='all')list=list.filter(function(p){return (p.status||'待读')===litFilter;});
   if(q)list=list.filter(function(p){return litSearchText(p).indexOf(q)>=0;});
+  const visibleIds=list.map(function(p){return p.id;});
+  litVisibleIds=visibleIds.slice();
+  /* 选中里可能含已被筛选掉的项，清掉以免「已选 3 篇」却看不见 */
+  if(litSel.length)litSel=litSel.filter(function(id){return all.some(function(p){return p.id===id;});});
   const vChips=litViewChipsHtml(all);
   const cnt=function(s){return s==='all'?all.length:all.filter(function(p){return (p.status||'待读')===s;}).length;};
   const sChips=[['all','全部']].concat(LIT_STATUS.map(function(s){return [s,s];})).map(function(x){
     return '<span class="insp-chip '+(litFilter===x[0]?'active':'')+'" data-action="research-lit-filter" data-f="'+x[0]+'">'+x[1]+' '+cnt(x[0])+'</span>';
   }).join('');
-  const items=list.length?list.map(paperItemHtml).join(''):(all.length?'<div class="empty">没有匹配的文献：换个视图、把状态切回「全部」，或清空关键词</div>':'<div class="empty">文献库为空。点「+ 新增」、「导入 PDF」，或用上方科研 AI 一句话录入</div>');
+  const items=list.length?list.map(paperItemHtml).join(''):(all.length?'<div class="empty">没有匹配的文献：换个视图、把状态切回「全部」，或清空关键词</div>':'<div class="empty">文献库为空。点下面的「导入 PDF」（可批量拖入），或用科研 AI 一句话录入</div>');
   const analyzed=all.filter(function(p){return litDimFilled(p)>=6;}).length;
   const noFile=all.filter(function(p){return !p.file;}).length;
-  return '<div class="card"><h3>'+ico('book')+' 文献库 <span class="sub" data-action="lit-import" style="cursor:pointer">导入 PDF</span> <span class="sub" data-action="add-paper" style="cursor:pointer">+ 新增</span></h3>'
-    +'<div class="row" style="gap:8px;margin-bottom:8px;flex-wrap:wrap"><input id="lit_q" class="fld" style="flex:1;min-width:160px;font-size:12.5px" placeholder="检索：标题 / 作者 / 期刊 / 标签 / 六维内容…" value="'+esc(litQ||'')+'"/><button class="btn sm" data-action="research-lit-q">检索</button></div>'
-    +'<div class="lit-fbar"><span class="lit-flab">视图</span><div class="insp-chips">'+vChips+'</div></div>'
-    +'<div class="lit-fbar"><span class="lit-flab">状态</span><div class="insp-chips">'+sChips+'</div></div>'
-    +items
-    +'<div class="muted" style="margin-top:8px;font-size:11px">共 '+all.length+' 篇 · 当前 '+list.length+' 篇 · 六维已完成 '+analyzed+' 篇'+(noFile?(' · '+noFile+' 篇没有原件（手机端导入的不落文件）'):'')+'。点条目展开精读：阅读 / 分析 / 改状态 / 复制引文。</div>'
-    +'<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn ghost sm" data-action="lit-import">📥 导入 PDF（可批量）</button><button class="btn ghost sm" data-action="zotero-import">📥 Zotero / BibTeX 导入</button></div>'
+  const fsum=esc(vDef[1])+' · '+esc(litFilter==='all'?'全部状态':litFilter)+' · 命中 '+list.length+' 篇';
+  return '<div class="card"><h3>'+ico('book')+' 文献库</h3>'
+    +'<div class="row" style="gap:8px;margin-bottom:8px;flex-wrap:wrap"><input id="lit_q" class="fld" style="flex:1;min-width:150px;font-size:12.5px" placeholder="检索：标题 / 作者 / 期刊 / 标签 / 六维内容…" value="'+esc(litQ||'')+'"/><button class="btn sm" data-action="research-lit-q">检索</button></div>'
+    +'<div class="lit-fbar"><span class="lit-flab">筛选</span>'
+      +'<span class="lit-fsum" data-action="lit-filter-toggle">'+fsum+'<span class="lit-ftog">'+(litFilterOpen?'收起 ▴':'展开 ▾')+'</span></span>'
+      +'<button class="btn ghost sm" data-action="lit-sel-'+(litSelOn?'off':'on')+'">'+(litSelOn?'退出多选':'多选')+'</button>'
+    +'</div>'
+    +(litFilterOpen?('<div class="lit-fbar"><span class="lit-flab">视图</span><div class="insp-chips">'+vChips+'</div></div>'
+      +'<div class="lit-fbar"><span class="lit-flab">状态</span><div class="insp-chips">'+sChips+'</div></div>'):'')
+    +litSelBarHtml(visibleIds)
+    +'<div class="lit-list'+(litSelOn?' selmode':'')+'">'+items+'</div>'
+    +'<div class="lit-foot">共 '+all.length+' 篇 · 六维已完成 '+analyzed+' 篇'+(noFile?(' · '+noFile+' 篇无原件'):'')+'。点条目展开精读；「多选」后可批量改状态 / 加标签 / 复制引文 / 删除。</div>'
+    +'<div class="lit-btns"><button class="btn ghost sm" data-action="lit-import">导入 PDF（可批量）</button><button class="btn ghost sm" data-action="zotero-import">Zotero / BibTeX 导入</button><button class="btn ghost sm" data-action="add-paper">+ 新增一条</button></div>'
     +'</div>';
 }
-
-/* ===== 科研进程内嵌 AI 面板 =====
-   与「对话」页**共用同一条对话**（chatMessages / aiSessId / 同一套工具与上下文），
-   这里只是把同一份记录换个地方显示，不另起一套。 */
-let resAiOpen=false;
+/* ===== 科研 AI（弹窗式） =====
+   与「对话」页**共用同一条对话**（chatMessages / aiSessId / 同一套工具与上下文）。
+   做成弹窗而不是内嵌面板：内嵌会把文献列表挤窄，长回答也没地方看。
+   科研页只留一条细入口，点开才占屏。 */
 function resAiUiMsgs(){
   return (chatMessages||[]).filter(function(m){return m.role!=='tool';}).slice(-20);
 }
+/* 科研页顶部的细入口条 */
+function resAiBarHtml(){
+  const n=resAiUiMsgs().length;
+  return '<div class="res-ai-bar">'
+    +'<span class="res-ai-dot'+(aiBusy?' busy':'')+'"></span>'
+    +'<span class="res-ai-bt">科研 AI</span>'
+    +'<span class="res-ai-bn">'+(aiBusy?'正在回答…':(n?('本轮对话 '+n+' 条'):'与「对话」页互通'))+'</span>'
+    +'<button class="btn ghost sm" data-action="res-ai-open" style="margin-left:auto">打开对话</button>'
+    +'<button class="btn ghost sm" data-action="lit-import">导入文献</button>'
+    +'</div>';
+}
+function resAiBarRender(){
+  const b=document.getElementById('resAiBar');
+  if(b)b.innerHTML=resAiBarHtml();
+}
+/* 弹窗内的对话正文；容器 id 固定 resAiBox，aiRender() 会顺带刷新它 */
 function resAiRender(){
   const box=document.getElementById('resAiBox');
   if(!box)return;
   box.innerHTML=resAiPanelHtml();
   const log=document.getElementById('resAiLog');
   if(log)log.scrollTop=log.scrollHeight;
+  const ta=document.getElementById('resAiText');
+  if(ta&&!ta.value)autoGrow(ta);
 }
 function resAiPanelHtml(){
   const papers=state.research.papers||[];
-  if(!resAiOpen){
-    return '<div class="res-ai-bar" data-action="res-ai-toggle"><span class="res-ai-dot"></span><span>科研 AI · 导入文献 / 分析精读 / 问文献库</span><span class="res-ai-open">展开</span></div>';
-  }
   const ms=resAiUiMsgs();
   const log=ms.length?ms.map(function(m){
     if(m.role==='user'){
       let t=m.content;
-      if(Array.isArray(t))t=t.map(function(p){return (p&&p.type==='text')?(p.text||''):'[图片]';}).join(' ');
+      if(Array.isArray(t))t=t.map(function(pp){return (pp&&pp.type==='text')?(pp.text||''):'[图片]';}).join(' ');
       return '<div class="res-ai-msg user">'+aiFmt(t)+'</div>';
     }
     return '<div class="res-ai-msg bot">'+aiFmt(m.content||'')+'</div>';
-  }).join(''):'<div class="res-ai-hint">这里和「对话」页是<b>同一条对话</b>，在哪儿问都一样。<br>· 导入：点上面「导入文献」，把 PDF 拖进弹窗<br>· 分析：<b>我的文献在理论上偏哪一派？</b><br>· 推进：<b>哪些文献还没做六维分析？</b></div>';
-  return '<div class="res-ai">'
-    +'<div class="res-ai-head"><span class="res-ai-dot"></span><span>科研 AI</span><span class="sub">文献库 '+papers.length+' 篇 · 与「对话」页互通</span>'
-    +'<span class="res-ai-x" data-action="lit-import">导入文献</span>'
-    +'<span class="res-ai-x" data-action="res-ai-goto">去对话页</span>'
-    +'<span class="res-ai-x" data-action="res-ai-toggle">收起</span></div>'
+  }).join(''):'<div class="res-ai-hint">这里和「对话」页是<b>同一条对话</b>，在哪儿问都一样。<br>· 录入：<b>帮我录入《xx》，作者 xx，期刊 xx 2023</b><br>· 分析：<b>我的文献在理论上偏哪一派？</b><br>· 推进：<b>哪些文献还没做六维分析？</b></div>';
+  return '<div class="res-ai-modal">'
+    +'<div class="res-ai-modal-h"><span class="muted">共 '+papers.length+' 篇文献 · 与「对话」页共用记录</span>'
+    +'<span style="flex:1"></span>'
+    +'<span class="res-ai-x" data-action="res-ai-new">新建对话</span>'
+    +'<span class="res-ai-x" data-action="res-ai-goto">去对话页</span></div>'
     +'<div class="res-ai-log" id="resAiLog">'+log+'</div>'
-    +'<div class="res-ai-in"><textarea id="resAiText" class="fld" rows="1" placeholder="说一句话录入文献，或问文献库…"></textarea><button class="btn sm" data-action="res-ai-send">'+(aiBusy?'…':'发送')+'</button></div>'
     +'<div class="res-ai-chips">'
     +'<span class="insp-chip" data-action="res-ai-quick" data-t="列出还没做六维分析的文献，并说明各自缺哪些维度">未分析清单</span>'
     +'<span class="insp-chip" data-action="res-ai-quick" data-t="统计我文献库里的理论视角标签分布，用一段话说明我的理论偏向">理论分布</span>'
     +'<span class="insp-chip" data-action="res-ai-quick" data-t="把已分析文献的「研究不足」汇到一起，提炼三个可做的选题">找选题</span>'
-    +'</div></div>';
+    +'</div>'
+    +'<div class="res-ai-in"><textarea id="resAiText" class="fld" rows="2" placeholder="说一句话录入文献，或问文献库…（Enter 发送）"></textarea><button class="btn sm" data-action="res-ai-send">'+(aiBusy?'…':'发送')+'</button></div>'
+    +'</div>';
+}
+function resAiModal(){
+  openModal('科研 AI','<div id="resAiBox"></div>');
+  resAiRender();
 }
 function resAiSend(text){
   if(aiBusy)return;
@@ -6064,6 +6243,18 @@ ${exist}`);break;}
     case 'lit-analyze': litAnalyze(el.dataset.id);break;
     case 'lit-paste': litPasteModal(el.dataset.id);break;
     case 'lit-paste-save': litPasteSave();break;
+    case 'lit-filter-toggle': litFilterOpen=!litFilterOpen;renderView();break;
+    case 'lit-sel-on': litSelOn=true;litOpen='';renderView();break;
+    case 'lit-sel-off': litSelOn=false;litSel=[];renderView();break;
+    case 'lit-sel-all':{const _ids=litVisibleIds||[];const _all=_ids.length&&_ids.every(litSelHas);litSel=_all?[]:_ids.slice();renderView();break;}
+    case 'lit-sel-none': litSel=[];renderView();break;
+    case 'lit-pick':{const _pid=el.dataset.id||'';const _i=litSel.indexOf(_pid);if(_i>=0)litSel.splice(_i,1);else litSel.push(_pid);renderView();break;}
+    case 'lit-sel-status': litSelStatusModal();break;
+    case 'lit-sel-status-set': litSelStatusSet(el.dataset.s||'待读');break;
+    case 'lit-sel-tag': litSelTagModal();break;
+    case 'lit-sel-tag-save': litSelTagSave();break;
+    case 'lit-sel-cite': litSelCite();break;
+    case 'lit-sel-del': litSelDel();break;
     case 'lit-read': litRead(el.dataset.id);break;
     case 'lit-set-status': litSetStatus(el.dataset.id,el.dataset.s||'待读');break;
     case 'lit-import': litImportModal();break;
@@ -6073,10 +6264,11 @@ ${exist}`);break;}
     case 'pdf-next': pdfStep(1);break;
     case 'pdf-zoom': pdfZoom(+el.dataset.d||1);break;
     case 'store-open-folder': openFolder(el.dataset.what||'media');break;
-    case 'res-ai-toggle': resAiOpen=!resAiOpen;renderView();break;
+    case 'res-ai-open': resAiModal();break;
+    case 'res-ai-new':{aiStartNew();resAiRender();resAiBarRender();break;}
     case 'res-ai-send':{const _ta=document.getElementById('resAiText');if(_ta){const _v=_ta.value;_ta.value='';resAiSend(_v);}break;}
     case 'res-ai-quick': resAiSend(el.dataset.t||'');break;
-    case 'res-ai-goto': navigate('ai');break;
+    case 'res-ai-goto': closeModal();navigate('ai');break;
     case 'research-lit-q':{litQ=((($('#lit_q')||{}).value)||'').trim();renderView();break;}
     case 'research-trad':{classicsTrad=el.dataset.f||'全部';renderView();break;}
     /* 期刊雷达 */
