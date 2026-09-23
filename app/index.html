@@ -1573,6 +1573,25 @@ button.btn.sm svg{width:14px;height:14px;flex:none}
   .rtabs::-webkit-scrollbar{display:none}
   .rtabs>*{flex:none}
 }
+/* ===== 文献关联星图（2026-09-23 五版） ===== */
+.gph-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:9px}
+.gph-wrap{position:relative;background:var(--surface-2);border:1px solid var(--line);border-radius:var(--radius-sm);overflow:hidden}
+.gph-cv{display:block;width:100%;height:58vh;min-height:300px;touch-action:none;cursor:grab}
+/* 桌面：画布限宽成近正方形。宽矩形里圆形节点群会左右空、上下顶，比例难看 */
+@media(min-width:769px){
+  .gph-wrap{max-width:660px;margin-left:auto;margin-right:auto}
+  .gph-cv{height:560px}
+}
+.gph-legend{display:flex;align-items:center;gap:12px;font-size:11px;color:var(--ink-soft);margin-top:8px;flex-wrap:wrap}
+.gph-legend i{display:inline-block;width:20px;height:2px;border-radius:2px;background:var(--accent);vertical-align:middle;margin-right:5px}
+.gph-tip{font-size:12px;color:var(--ink-soft);line-height:1.75;margin-top:8px}
+.gph-list{margin-top:12px;border-top:1px dashed var(--line);padding-top:10px}
+.gph-list-h{font-size:12px;font-weight:600;color:var(--accent);margin-bottom:6px;letter-spacing:.4px}
+.gph-pair{display:flex;align-items:center;gap:8px;padding:6px 8px;font-size:12.5px;cursor:pointer;border-radius:9px}
+.gph-pair:hover{background:var(--surface-2)}
+.gph-pair-w{flex:none;width:32px;text-align:right;font-weight:800;color:var(--accent);font-variant-numeric:tabular-nums;font-size:12px}
+.gph-pair-t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gph-pair-why{flex:none;font-size:11px;color:var(--ink-soft);max-width:46%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 </style>
 </head>
 <body>
@@ -4109,7 +4128,8 @@ const LIT_VIEWS=[
   ['theory','理论视角',function(p){return (litTags(p,'theoryTags').length>0)||(String(p.theory||'').trim()&&!litPlaceholder(p.theory));}],
   ['media','媒介研究',function(p){return String(p.tags||'').indexOf('媒介研究')>=0;}],
   ['reading','在读',function(p){return (p.status||'待读')==='在读';}],
-  ['cite','引用格式库',function(){return true;}]
+  ['cite','引用格式库',function(){return true;}],
+  ['graph','关联星图',function(){return true;}]
 ];
 const LIT_STATUS=['待读','在读','精读中','已读','已引用'];
 /* 列表排序方式。行首 # 号始终是「录入顺序」的固定序号，不随排序变化——
@@ -4837,6 +4857,464 @@ function paperItemHtml(p){
     +(on?'':('<button class="mini-btn" data-action="del" data-coll="research.papers" data-id="'+p.id+'">'+ico('trash')+'</button>'))
     +'</div>'+detail+'</div>';
 }
+/* ===== 文献关联星图（2026-09-23 五版） =====
+   把文献之间的关系画成力导向图：节点 = 一篇文献，连线 = 两篇之间有联系，线越粗越深越强。
+   关联强度**完全由可核对的字段算出**（理论标签 / 分类标签 / 同刊 / 同作者 / 年份邻近 / 摘要重合），
+   不调用模型——所以结果稳定、每次一样，而且鼠标停在线上能看到「为什么相连」。
+   Canvas 绘制：文献量小，直接跑经典斥力-引力迭代，不用引外部库。 */
+const LIT_GRAPH_LEVELS = [['all', '全部关联'], ['mid', '中等以上'], ['strong', '只看强关联']];
+let litGraphLevel = 'all';
+let litGraphSel = '';      // 当前选中的文献 id
+let litGraphSeed = 0;      // 「重新排布」换一个初始角度
+const litGraphState = { nodes: [], links: [], W: 0, H: 0, raf: 0, alpha: 0, drag: null, hot: -1, hotLink: -1 };
+
+/* 作者拆成集合（中英文分隔符都吃） */
+function litGraphAuthors(p) {
+  return String(p.author || '').split(/[,，、;；\/\s]+/).filter(function (x) { return x.length > 0; });
+}
+/* 摘要 + 核心发现 → 2-gram 集合，用于算内容重合（截断控制耗时） */
+function litGraphGrams(p) {
+  const s = (String(p.abstract || '') + ' ' + String(p.findings || '')).slice(0, 600)
+    .replace(/[^\u4e00-\u9fa5a-zA-Z0-9]+/g, '').toLowerCase();
+  const set = new Set();
+  for (let i = 0; i < s.length - 1; i++) set.add(s.slice(i, i + 2));
+  return set;
+}
+/* 标题主题词 → 2-gram（中英混排也能对上「APEC」这类词） */
+function litGraphTitleGrams(p) {
+  const s = String(p.title || '').replace(/[^\u4e00-\u9fa5a-zA-Z0-9]+/g, '').toLowerCase();
+  const set = new Set();
+  for (let i = 0; i < s.length - 1; i++) set.add(s.slice(i, i + 2));
+  return set;
+}
+/* 两篇之间的关联强度 + 原因清单（可核对，不猜） */
+function litGraphScore(a, b, grams, hgrams) {
+  let s = 0; const why = [];
+  const A = litTags(a, 'theoryTags'), B = litTags(b, 'theoryTags');
+  const st = A.filter(function (x) { return B.indexOf(x) >= 0; });
+  if (st.length) { s += st.length * 3; why.push('同理论 · ' + st.slice(0, 2).join('、')); }
+  const C = litTags(a, 'tags'), D = litTags(b, 'tags');
+  const sc = C.filter(function (x) { return D.indexOf(x) >= 0; });
+  if (sc.length) { s += sc.length * 1.5; why.push('同标签 · ' + sc.slice(0, 2).join('、')); }
+  const va = String(a.venue || '').trim(), vb = String(b.venue || '').trim();
+  if (va && va === vb) { s += 2; why.push('同一期刊'); }
+  const pa = litGraphAuthors(a), pb = litGraphAuthors(b);
+  if (pa.length && pb.length && pa.some(function (x) { return pb.indexOf(x) >= 0; })) { s += 2.5; why.push('同作者'); }
+  const ya = parseInt(a.year, 10), yb = parseInt(b.year, 10);
+  if (!isNaN(ya) && !isNaN(yb) && Math.abs(ya - yb) <= 2) { s += 0.8; }
+  const ga = grams[a.id], gb = grams[b.id];
+  if (ga && gb && ga.size > 8 && gb.size > 8) {
+    let inter = 0;
+    ga.forEach(function (x) { if (gb.has(x)) inter++; });
+    const j = inter / Math.min(ga.size, gb.size);
+    if (j > 0.08) { s += Math.min(2, j * 8); why.push('内容重合 ' + Math.round(j * 100) + '%'); }
+  }
+  const ha = hgrams[a.id], hb = hgrams[b.id];
+  if (ha && hb && ha.size > 4 && hb.size > 4) {
+    let inter = 0;
+    ha.forEach(function (x) { if (hb.has(x)) inter++; });
+    const j = inter / Math.min(ha.size, hb.size);
+    if (j >= 0.12) { s += Math.min(1.5, j * 5); why.push('主题相近 ' + Math.round(j * 100) + '%'); }
+  }
+  return { score: s, why: why };
+}
+function litGraphLevelMin(lv) { return lv === 'all' ? 0.001 : (lv === 'strong' ? 0.62 : 0.32); }
+
+/* 构建图数据：节点半径按关联条数，边的粗细按强度 */
+function litGraphBuild() {
+  const all = state.research.papers || [];
+  const grams = {}, hgrams = {};
+  all.forEach(function (p) { grams[p.id] = litGraphGrams(p); hgrams[p.id] = litGraphTitleGrams(p); });
+  const min = litGraphLevelMin(litGraphLevel);
+  /* 先收所有达到「至少有一项实质关联」的对，再按库内最高分归一化——
+     绝对分阈值在不同字段丰富度的库里表现差别太大：标签少的库会一条线都画不出来。
+     改成相对强度后，一眼看到的就是「这个库里最紧的几组关系」。 */
+  const raw = [];
+  for (let i = 0; i < all.length; i++) {
+    for (let j = i + 1; j < all.length; j++) {
+      const r = litGraphScore(all[i], all[j], grams, hgrams);
+      if (r.score >= 0.8) raw.push({ i: i, j: j, score: r.score, why: r.why });
+    }
+  }
+  const maxS = raw.reduce(function (m, r) { return Math.max(m, r.score); }, 1);
+  const links = [];
+  raw.forEach(function (r) {
+    const w = Math.min(1, r.score / maxS);
+    if (w < min) return;
+    links.push({ i: r.i, j: r.j, w: w, score: r.score, why: r.why });
+  });
+  const deg = all.map(function () { return 0; });
+  links.forEach(function (l) { deg[l.i]++; deg[l.j]++; });
+  const nodes = all.map(function (p, i) {
+    return { id: p.id, no: litNo(p.id), title: p.title || '(无标题)',
+      author: p.author || '', year: p.year || '', venue: p.venue || '',
+      status: p.status || '待读', tag: (litTags(p, 'theoryTags')[0] || litTags(p, 'tags')[0] || ''),
+      deg: deg[i], r: 6 + Math.min(11, deg[i] * 1.7), x: 0, y: 0, vx: 0, vy: 0 };
+  });
+  litGraphState.nodes = nodes;
+  litGraphState.links = links;
+  return { nodes: nodes, links: links };
+}
+
+/* 初始化位置：圆周铺开（带随机扰动，避免重合） */
+function litGraphSeedPositions() {
+  const st = litGraphState, n = st.nodes;
+  const R = Math.min(st.W, st.H) * 0.33;
+  n.forEach(function (p, i) {
+    const a = (i / Math.max(1, n.length)) * Math.PI * 2 + litGraphSeed * 0.7;
+    const jitter = 0.72 + ((i * 37) % 23) / 46;
+    p.x = st.W / 2 + Math.cos(a) * R * jitter;
+    p.y = st.H / 2 + Math.sin(a) * R * jitter;
+    p.vx = 0; p.vy = 0;
+  });
+}
+
+/* 一帧物理：斥力 + 边引力 + 轻微向心 + 阻尼。
+   关键是**限速**——不加位移上限的话，第一帧的斥力会把节点直接弹到画布边缘。 */
+function litGraphTick() {
+  const st = litGraphState, n = st.nodes;
+  if (!n.length) return;
+  /* 间距由画布面积算，但必须夹在 70–140px 之间：
+     桌面画布宽到 1000px 时纯按面积算会得到 150px+ 的理想距离，四个节点就被摊到四个角。 */
+  const k = Math.max(70, Math.min(140, Math.sqrt((st.W * st.H) / n.length) * 0.42));
+  const lim = 2.5 + st.alpha * 9;
+  n.forEach(function (a, i) {
+    let fx = 0, fy = 0;
+    for (let j = 0; j < n.length; j++) {
+      if (i === j) continue;
+      const b = n[j];
+      const dx = a.x - b.x, dy = a.y - b.y;
+      let d2 = dx * dx + dy * dy;
+      if (d2 < 100) d2 = 100;
+      const f = ((k * k) / d2) * 0.22;
+      fx += dx * f; fy += dy * f;
+    }
+    a.vx = (a.vx + fx) * 0.86;
+    a.vy = (a.vy + fy) * 0.86;
+  });
+  st.links.forEach(function (l) {
+    const a = n[l.i], b = n[l.j];
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const d = Math.sqrt(dx * dx + dy * dy) || 1;
+    const target = k * (1.25 - l.w * 0.55);   /* 关系越强，拉得越近 */
+    const f = (d - target) * 0.045 * (0.6 + l.w);
+    const ux = dx / d, uy = dy / d;
+    a.vx += ux * f; a.vy += uy * f;
+    b.vx -= ux * f; b.vy -= uy * f;
+  });
+  const RR = Math.min(st.W, st.H) * 0.42;
+  n.forEach(function (p) {
+    p.vx += (st.W / 2 - p.x) * 0.022;
+    p.vy += (st.H / 2 - p.y) * 0.022;
+    /* 软边界：出了半径 RR 就强力拉回，保证节点一定落在可视区内 */
+    const ox = p.x - st.W / 2, oy = p.y - st.H / 2;
+    const od = Math.sqrt(ox * ox + oy * oy) || 1;
+    if (od > RR) { p.vx -= (ox / od) * (od - RR) * 0.18; p.vy -= (oy / od) * (od - RR) * 0.18; }
+    const sp = Math.sqrt(p.vx * p.vx + p.vy * p.vy);
+    if (sp > lim) { p.vx = p.vx / sp * lim; p.vy = p.vy / sp * lim; }
+    p.x += p.vx; p.y += p.vy;
+    const pad = 26 + p.r;
+    p.x = Math.max(pad, Math.min(st.W - pad, p.x));
+    p.y = Math.max(pad, Math.min(st.H - pad, p.y));
+    /* 硬约束：直接投影回半径 RR 的圆内。软力在宽画布上压不住斥力，
+       节点会飘到四角；硬约束才能保证「不管参数怎么调都在可视区中部」。 */
+    const hx = p.x - st.W / 2, hy = p.y - st.H / 2;
+    const hd = Math.sqrt(hx * hx + hy * hy);
+    if (hd > RR) { p.x = st.W / 2 + (hx / hd) * RR; p.y = st.H / 2 + (hy / hd) * RR; }
+  });
+}
+/* 离线把图「摇匀」：打开就是收敛好的样子，不用盯着它慢慢飘 */
+function litGraphSettle(iters) {
+  const st = litGraphState;
+  st.alpha = 1.3;
+  for (let i = 0; i < (iters || 150); i++) { litGraphTick(); st.alpha *= 0.982; }
+  st.alpha = 0.32;
+}
+
+function litGraphTheme() {
+  const cs = getComputedStyle(document.documentElement);
+  const g = function (k, d) { const v = cs.getPropertyValue(k).trim(); return v || d; };
+  return { accent: g('--accent', '#2d5a3d'), soft: g('--ink-soft', '#5a6b62'),
+    ink: g('--ink', '#1f2e25'), line: g('--line', 'rgba(0,0,0,.12)'), gold: g('--gold', '#c9a96e'),
+    surface: g('--surface', '#fbf8f1') };
+}
+function litGraphNodeAt(mx, my) {
+  const n = litGraphState.nodes;
+  for (let i = n.length - 1; i >= 0; i--) {
+    const dx = mx - n[i].x, dy = my - n[i].y;
+    if (dx * dx + dy * dy <= (n[i].r + 6) * (n[i].r + 6)) return i;
+  }
+  return -1;
+}
+function litGraphLinkAt(mx, my) {
+  const st = litGraphState, n = st.nodes;
+  let best = -1, bestD = 7 * 7;
+  st.links.forEach(function (l, idx) {
+    const a = n[l.i], b = n[l.j];
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const len2 = dx * dx + dy * dy || 1;
+    let t = ((mx - a.x) * dx + (my - a.y) * dy) / len2;
+    t = Math.max(0, Math.min(1, t));
+    const px = a.x + dx * t, py = a.y + dy * t;
+    const d2 = (mx - px) * (mx - px) + (my - py) * (my - py);
+    if (d2 < bestD) { bestD = d2; best = idx; }
+  });
+  return best;
+}
+
+function litGraphDraw() {
+  const st = litGraphState, cv = document.getElementById('litGraphCv');
+  if (!cv || !cv.getContext) return;
+  const dpr = window.devicePixelRatio || 1;
+  const W = cv.clientWidth || 320, H = cv.clientHeight || 320;
+  if (st.W !== W || st.H !== H) {
+    st.W = W; st.H = H;
+    cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+    litGraphSeedPositions();
+    litGraphSettle(140);
+  }
+  const ctx = cv.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  const T = litGraphTheme();
+  const n = st.nodes;
+  if (!n.length) return;
+  const selIdx = litGraphSel ? n.findIndex(function (p) { return p.id === litGraphSel; }) : -1;
+  const near = {};
+  if (selIdx >= 0) st.links.forEach(function (l) {
+    if (l.i === selIdx) near[l.j] = 1;
+    if (l.j === selIdx) near[l.i] = 1;
+  });
+  const dim = function (i) { return selIdx >= 0 && i !== selIdx && !near[i]; };
+
+  /* 边 */
+  st.links.forEach(function (l, idx) {
+    const a = n[l.i], b = n[l.j];
+    const hot = idx === st.hotLink;
+    const touch = selIdx >= 0 && (l.i === selIdx || l.j === selIdx);
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
+    if (selIdx >= 0 && !touch) {
+      ctx.strokeStyle = T.line; ctx.lineWidth = 0.7; ctx.globalAlpha = 0.5;
+    } else {
+      ctx.strokeStyle = hot ? T.gold : T.accent;
+      ctx.lineWidth = 0.7 + l.w * 3.2;
+      ctx.globalAlpha = 0.22 + l.w * 0.72;
+    }
+    ctx.stroke(); ctx.globalAlpha = 1;
+  });
+
+  /* 节点 */
+  n.forEach(function (p, i) {
+    const on = !dim(i) || i === st.hot;
+    ctx.globalAlpha = on ? 1 : 0.26;
+    ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+    ctx.fillStyle = (i === selIdx || i === st.hot) ? T.gold : T.accent;
+    ctx.fill();
+    if (i === selIdx) { ctx.strokeStyle = T.gold; ctx.lineWidth = 2.4; ctx.stroke(); }
+    ctx.fillStyle = '#fff';
+    ctx.font = '600 ' + Math.max(9, Math.round(p.r * 0.92)) + 'px system-ui,sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(String(p.no), p.x, p.y + 0.5);
+    /* 小节点不常驻标题，避免糊；选中/悬停才显示 */
+    if (i === selIdx || i === st.hot || p.deg >= 3) {
+      ctx.globalAlpha = on ? 1 : 0.26;
+      ctx.font = '500 10.5px system-ui,sans-serif';
+      ctx.fillStyle = i === selIdx ? T.ink : T.soft;
+      let t = String(p.tag || p.title || '');
+      if (t.length > 12) t = t.slice(0, 12) + '…';
+      ctx.fillText(t, p.x, p.y + p.r + 11);
+    }
+    ctx.globalAlpha = 1;
+  });
+
+  /* 悬停连线的原因提示 */
+  if (st.hotLink >= 0) {
+    const l = st.links[st.hotLink];
+    const a = n[l.i], b = n[l.j];
+    const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+    const txt = l.why.length ? l.why.join(' · ') : '关联';
+    ctx.font = '600 11px system-ui,sans-serif';
+    const w = ctx.measureText(txt).width + 16;
+    let bx = Math.max(6, Math.min(W - w - 6, mx - w / 2));
+    let by = Math.max(6, my - 30);
+    ctx.fillStyle = T.ink; ctx.globalAlpha = 0.9;
+    ctx.beginPath();
+    if (ctx.roundRect) { ctx.roundRect(bx, by, w, 21, 7); ctx.fill(); }
+    else ctx.fillRect(bx, by, w, 21);
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = T.surface; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    ctx.fillText(txt, bx + 8, by + 11);
+  }
+}
+
+function litGraphLoop() {
+  const st = litGraphState;
+  if (!document.getElementById('litGraphCv')) { st.raf = 0; return; }
+  if (st.alpha > 0.004) {
+    litGraphTick();
+    st.alpha *= 0.985;
+    if (st.alpha <= 0.004) st.alpha = 0;
+  } else if (st.drag === null) {
+    litGraphDraw(); st.raf = 0; return;   /* 收敛后停帧，省电 */
+  } else {
+    litGraphTick();
+  }
+  litGraphDraw();
+  st.raf = requestAnimationFrame(litGraphLoop);
+}
+function litGraphKick(a) {
+  const st = litGraphState;
+  st.alpha = Math.max(st.alpha, a || 1);
+  if (!st.raf) st.raf = requestAnimationFrame(litGraphLoop);
+}
+
+/* 重新排布 / 换强度档 / 选中变化后重画 */
+function litGraphReset() { litGraphSeed++; litGraphSeedPositions(); litGraphSettle(120); litGraphKick(0.32); }
+function litGraphRefresh(keepPos) {
+  const old = {};
+  litGraphState.nodes.forEach(function (p) { old[p.id] = { x: p.x, y: p.y }; });
+  litGraphBuild();
+  if (keepPos) {
+    /* 只换强度档位时保留当前摆位，免得图「跳」一下 */
+    litGraphState.nodes.forEach(function (p) { if (old[p.id]) { p.x = old[p.id].x; p.y = old[p.id].y; } });
+  } else {
+    litGraphSeedPositions();
+  }
+  litGraphSettle(keepPos ? 40 : 130);
+  litGraphKick(0.32);
+  litGraphListRender();
+  litGraphCountRender();
+}
+function litGraphCountRender() {
+  const el = document.getElementById('litGraphCount');
+  if (el) el.textContent = litGraphState.nodes.length + ' 个节点 · ' + litGraphState.links.length + ' 条关联';
+}
+/* 下方的清单：选中某篇时列它的邻居，未选中时列全库最强关联 */
+function litGraphListRender() {
+  const box = document.getElementById('litGraphList');
+  if (!box) return;
+  const st = litGraphState, n = st.nodes;
+  const si = litGraphSel ? n.findIndex(function (p) { return p.id === litGraphSel; }) : -1;
+  let rows = st.links;
+  if (si >= 0) rows = rows.filter(function (l) { return l.i === si || l.j === si; });
+  rows = rows.map(function (l) { return { w: l.w, a: n[l.i], b: n[l.j], why: l.why }; })
+    .sort(function (x, y) { return y.w - x.w; });
+  const top = rows.slice(0, 8);
+  const head = si >= 0
+    ? ('与 <b>#' + n[si].no + '</b> 相关的文献' + (top.length ? '' : '：无'))
+    : ('全库最强关联 Top ' + top.length);
+  if (!top.length) {
+    box.innerHTML = '<div class="gph-list-h">' + head + '</div>'
+      + '<div class="muted" style="font-size:12px;line-height:1.7">当前强度档位下没有关联。把上面的档位切到「全部关联」试试；'
+      + '或者给文献补上理论视角 / 分类标签——关联主要靠这些字段算出来。</div>';
+    return;
+  }
+  box.innerHTML = '<div class="gph-list-h">' + head + '</div>' + top.map(function (r) {
+    const other = si >= 0 ? (r.a.id === litGraphSel ? r.b : r.a) : r.b;
+    const label = si >= 0
+      ? ('#' + other.no + ' ' + esc(other.title))
+      : ('#' + r.a.no + ' ↔ #' + r.b.no + ' ' + esc(r.a.title));
+    return '<div class="gph-pair" data-action="lit-graph-node" data-id="' + (si >= 0 ? other.id : r.a.id) + '"'
+      + ' title="' + esc(r.a.title) + '  ↔  ' + esc(r.b.title) + '">'
+      + '<span class="gph-pair-w">' + Math.round(r.w * 100) + '</span>'
+      + '<span class="gph-pair-t">' + label + '</span>'
+      + '<span class="gph-pair-why">' + esc(r.why.slice(0, 2).join(' · ') || '关联') + '</span></div>';
+  }).join('');
+}
+
+/* 绑定画布交互（canvas 里的事件不走 data-action 委托，必须手动绑） */
+function litGraphBoot() {
+  const cv = document.getElementById('litGraphCv');
+  if (!cv) return;
+  litGraphBuild();
+  const W = cv.clientWidth || 320, H = cv.clientHeight || 320;
+  litGraphState.W = W; litGraphState.H = H;
+  /* 必须在这里就把画布的**像素**尺寸设成 CSS 尺寸 × dpr：
+     否则 canvas 保持默认 300×150，却被 CSS 拉到 329×490，
+     坐标系和可视区对不上——节点就会画到屏幕外。 */
+  const dpr0 = window.devicePixelRatio || 1;
+  cv.width = Math.round(W * dpr0);
+  cv.height = Math.round(H * dpr0);
+  litGraphSeedPositions();
+  litGraphCountRender();
+  litGraphListRender();
+  litGraphSettle(220);
+  litGraphKick(0.32);
+  if (cv.dataset.bound) return;
+  cv.dataset.bound = '1';
+  let downX = 0, downY = 0, moved = false;
+  const pos = function (e) {
+    const r = cv.getBoundingClientRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
+  };
+  cv.addEventListener('pointerdown', function (e) {
+    const p = pos(e); downX = p.x; downY = p.y; moved = false;
+    const i = litGraphNodeAt(p.x, p.y);
+    if (i >= 0) { litGraphState.drag = i; try { cv.setPointerCapture(e.pointerId); } catch (x) {} litGraphKick(0.6); }
+  });
+  cv.addEventListener('pointermove', function (e) {
+    const p = pos(e);
+    if (Math.abs(p.x - downX) > 4 || Math.abs(p.y - downY) > 4) moved = true;
+    const st = litGraphState;
+    if (st.drag !== null) {
+      const nd = st.nodes[st.drag];
+      nd.x = p.x; nd.y = p.y; nd.vx = 0; nd.vy = 0;
+      litGraphKick(0.5);
+    } else {
+      const hi = litGraphNodeAt(p.x, p.y);
+      const hl = hi < 0 ? litGraphLinkAt(p.x, p.y) : -1;
+      if (hi !== st.hot || hl !== st.hotLink) { st.hot = hi; st.hotLink = hl; litGraphDraw(); }
+      cv.style.cursor = hi >= 0 ? 'grab' : (hl >= 0 ? 'help' : 'default');
+    }
+  });
+  const up = function (e) {
+    const st = litGraphState;
+    if (st.drag !== null) {
+      const i = st.drag; st.drag = null;
+      if (!moved) {
+        const id = st.nodes[i].id;
+        litGraphSel = (litGraphSel === id) ? '' : id;
+        litGraphListRender(); litGraphKick(0.35);
+      }
+      return;
+    }
+    const p = pos(e);
+    if (litGraphNodeAt(p.x, p.y) < 0) { litGraphSel = ''; litGraphListRender(); litGraphDraw(); }
+  };
+  cv.addEventListener('pointerup', up);
+  cv.addEventListener('pointercancel', function () { litGraphState.drag = null; });
+  cv.addEventListener('pointerleave', function () {
+    litGraphState.hot = -1; litGraphState.hotLink = -1; litGraphDraw();
+  });
+}
+
+function renderLitGraph(all) {
+  const list = (all || []).filter(function (p) { return true; });
+  const chips = LIT_GRAPH_LEVELS.map(function (l) {
+    return '<span class="insp-chip ' + (litGraphLevel === l[0] ? 'active' : '') + '" data-action="lit-graph-level" data-l="' + l[0] + '">' + l[1] + '</span>';
+  }).join('');
+  if (list.length < 2) {
+    return '<div class="card"><h3>' + ico('inspiration') + ' 关联星图 <span class="sub">文献之间的联系</span></h3>'
+      + '<div class="empty">至少需要 2 篇文献才能画出关联。先去导入几篇。</div></div>';
+  }
+  requestAnimationFrame(function () { litGraphBoot(); });
+  return '<div class="card"><h3>' + ico('inspiration') + ' 关联星图 <span class="sub" id="litGraphCount"></span></h3>'
+    + '<div class="lit-fbar"><span class="lit-flab">视图</span><div class="insp-chips">' + litViewChipsHtml(all) + '</div></div>'
+    + '<div class="gph-bar">'
+    + '<span class="lit-flab">强度</span><div class="insp-chips">' + chips + '</div>'
+    + '<button class="btn ghost sm" data-action="lit-graph-reset" style="margin-left:auto">重新排布</button>'
+    + '</div>'
+    + '<div class="gph-wrap"><canvas class="gph-cv" id="litGraphCv"></canvas></div>'
+    + '<div class="gph-legend"><span><i style="opacity:.35"></i>细线 = 弱关联</span>'
+    + '<span><i style="width:26px;height:3px"></i>粗线 = 强关联</span>'
+    + '<span>圆越大 = 关联越多</span><span>圆内数字 = 文献序号</span></div>'
+    + '<div class="gph-tip">节点是文献（数字即库内序号），连线表示两篇有联系。<b>鼠标停在线上</b>看它们为什么相连；'
+    + '<b>拖动</b>可以手动摆位置，<b>点一下</b>节点会高亮它的关联并列出清单。关联由理论视角 / 分类标签 / 同刊 / 同作者 / 年份邻近 / 摘要重合六项算出，不靠模型推断。</div>'
+    + '<div class="gph-list" id="litGraphList"></div>'
+    + '<div class="lit-foot">同一份文献库每次画出的图一样——关联是算出来的，不是猜出来的。</div></div>';
+}
+
 function renderLitCite(all,q){
   const list=all.filter(function(p){return !q||litSearchText(p).indexOf(q)>=0;});
   const rows=list.length?list.map(function(p){
@@ -4854,6 +5332,7 @@ function renderResearchLiterature(){
   const R=state.research, all=R.papers||[];
   const q=(litQ||'').toLowerCase();
   if(litView==='cite')return renderLitCite(all,q);
+  if(litView==='graph')return renderLitGraph(all);
   const vDef=(LIT_VIEWS.filter(function(v){return v[0]===litView;})[0])||LIT_VIEWS[0];
   let list=all.slice();
   if(vDef[0]!=='all')list=list.filter(vDef[2]);
@@ -4873,7 +5352,7 @@ function renderResearchLiterature(){
   const analyzed=all.filter(function(p){return litDimFilled(p)>=6;}).length;
   const noFile=all.filter(function(p){return !p.file;}).length;
   const fsum=esc(vDef[1])+' · '+esc(litFilter==='all'?'全部状态':litFilter)+' · 命中 '+list.length+' 篇';
-  return '<div class="card"><h3>'+ico('book')+' 文献库</h3>'
+  return '<div class="card"><h3>'+ico('book')+' 文献库 <span class="sub" data-action="lit-goto-graph" style="cursor:pointer">关联星图 ›</span></h3>'
     +'<div class="row" style="gap:8px;margin-bottom:8px;flex-wrap:wrap"><input id="lit_q" class="fld" style="flex:1;min-width:150px;font-size:13px" placeholder="检索：标题 / 作者 / 期刊 / 标签 / 六维内容…" value="'+esc(litQ||'')+'"/><button class="btn sm" data-action="research-lit-q">检索</button></div>'
     +'<div class="lit-sbar"><span class="lit-flab">排序</span><div class="insp-chips">'
       +LIT_SORTS.map(function(x){return '<span class="insp-chip '+(litSort===x[0]?'active':'')+'" data-action="lit-sort" data-s="'+x[0]+'">'+litSortLabel(x)+'</span>';}).join('')
@@ -6527,6 +7006,10 @@ ${exist}`);break;}
     case 'research-lit-filter': litFilter=el.dataset.f;litQ='';saveTabPref('muan.litF',litFilter);renderView();break;
     case 'research-lit-view': litView=el.dataset.v||'all';litQ='';saveTabPref('muan.litV',litView);renderView();break;
     case 'lit-sort':{const _s=el.dataset.s||'added';if(_s===litSort&&_s==='year'){litDir=(litDir==='asc'?'desc':'asc');saveTabPref('muan.litD',litDir);}else{litSort=_s;saveTabPref('muan.litS',litSort);}renderView();break;}
+    case 'lit-goto-graph': litView='graph';saveTabPref('muan.litV',litView);renderView();break;
+    case 'lit-graph-level':{litGraphLevel=el.dataset.l||'mid';litGraphRefresh(true);break;}
+    case 'lit-graph-reset': litGraphReset();break;
+    case 'lit-graph-node':{const _gid=el.dataset.id||'';litGraphSel=(litGraphSel===_gid?'':_gid);litGraphListRender();litGraphKick(0.45);break;}
     case 'lit-toggle':{const _id=el.dataset.id||'';litOpen=(litOpen===_id?'':_id);saveTabPref('muan.litOpen',litOpen);renderView();break;}
     case 'lit-copy-cite':{const _p=(state.research.papers||[]).filter(x=>x.id===el.dataset.id)[0];if(!_p)break;const _c=apaCite(_p);if(!_c){toast('这篇缺作者和标题，拼不出引文','warn');break;}copyText(_c,'引文已复制（APA 7）');break;}
     case 'lit-analyze': litAnalyze(el.dataset.id);break;
