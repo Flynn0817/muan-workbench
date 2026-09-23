@@ -2,3 +2,5 @@
 muan.log
 node_modules/
 .DS_Store
+# 本机配置：路径 + 个人化泄露扫描规则，不进公开仓库
+sync-repo.local.json
