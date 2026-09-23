@@ -1594,7 +1594,23 @@ button.btn.sm svg{width:14px;height:14px;flex:none}
 .gph-pair-why{flex:none;font-size:11px;color:var(--ink-soft);max-width:46%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 /* 星图：聚类图例 + 选中信息卡（2026-09-23 六版） */
-.gph-legend-c{display:inline-flex;align-items:center;gap:5px;margin-right:4px}
+ .gph-legend i.dash{background:none;border-top:2px dashed color-mix(in srgb, var(--accent) 60%, transparent);height:0;border-radius:0}
+ .gph-lv{flex:none;display:inline-flex;align-items:center;justify-content:center;min-width:36px;height:19px;padding:0 6px;border-radius:6px;font-size:11px;font-weight:700;white-space:nowrap}
+ .gph-lv-strong{background:color-mix(in srgb, var(--accent) 24%, transparent);color:var(--accent-deep)}
+ .gph-lv-mid{background:color-mix(in srgb, var(--accent) 11%, transparent);color:var(--accent)}
+ .gph-lv-weak{background:var(--surface-2);color:var(--ink-soft);font-weight:600}
+ .gph-rules{font-size:13px;line-height:1.75;color:var(--ink)}
+ .gph-rules h4{margin:15px 0 5px;font-size:12.5px;font-weight:700;color:var(--accent);letter-spacing:.3px}
+ .gph-rules h4:first-child{margin-top:0}
+ .gph-rules p{margin:0 0 4px;font-size:12.5px;color:var(--ink-soft)}
+ .gph-rtbl{display:grid;grid-template-columns:auto 1fr;gap:5px 12px;margin:6px 0 4px}
+ .gph-rtbl-k{font-weight:700;white-space:nowrap;font-size:12.5px}
+ .gph-rtbl-v{font-size:12.5px;color:var(--ink-soft)}
+ .gph-rules table{width:100%;border-collapse:collapse;font-size:12.5px;margin:6px 0 4px}
+ .gph-rules th,.gph-rules td{text-align:left;padding:5px 6px;border-bottom:1px solid var(--line);vertical-align:top}
+ .gph-rules th{color:var(--ink-soft);font-weight:600;font-size:11.5px}
+ .gph-rules table td:first-child,.gph-rules table td:last-child{white-space:nowrap}
+ .gph-legend-c{display:inline-flex;align-items:center;gap:5px;margin-right:4px}
 .gph-legend-c i{width:9px;height:9px;border-radius:50%;display:inline-block;flex:none}
 .gph-sel{margin-top:12px}
 .gph-selcard{background:var(--surface-2);border:1px solid var(--line);border-radius:var(--radius-sm);padding:11px 13px}
@@ -4873,11 +4889,16 @@ function paperItemHtml(p){
    关联强度**完全由可核对的字段算出**（理论标签 / 分类标签 / 同刊 / 同作者 / 年份邻近 / 摘要重合），
    不调用模型——所以结果稳定、每次一样，而且鼠标停在线上能看到「为什么相连」。
    Canvas 绘制：文献量小，直接跑经典斥力-引力迭代，不用引外部库。 */
-const LIT_GRAPH_LEVELS = [['all', '全部关联'], ['mid', '中等以上'], ['strong', '只看强关联']];
-/* 连线门槛：低于此分**不连线**。定在 1.5 是有意的——
-   一项共享分类标签正好 1.5 分，用户按提示「给几篇加同一个标签」就该立刻看到连线；
-   而年份邻近(0.8)与标题相似(≤1.5)只在已有硬证据时才计分，凑不到这个门槛。 */
-const LIT_GRAPH_MIN = 1.5;
+const LIT_GRAPH_LEVELS = [['all', '全部关联'], ['mid', '明确及以上'], ['strong', '只看强关联']];
+/* 关系分级元数据：rank 用于排序与「明确及以上」判定 */
+const LIT_GRAPH_LV = { strong: { n: '强关联', rank: 3 }, mid: { n: '明确关联', rank: 2 }, weak: { n: '弱关联', rank: 1 } };
+function litGraphLvRank(lv) { return (LIT_GRAPH_LV[lv] || LIT_GRAPH_LV.weak).rank; }
+function litGraphLvName(lv) { return (LIT_GRAPH_LV[lv] || LIT_GRAPH_LV.weak).n; }
+function litGraphPass(sel, level) {
+  if (sel === 'strong') return level === 'strong';
+  if (sel === 'mid') return level === 'strong' || level === 'mid';
+  return true;
+}
 let litGraphLevel = 'all';
 let litGraphSel = '';      // 当前选中的文献 id
 let litGraphSeed = 0;      // 「重新排布」换一个初始角度
@@ -4918,78 +4939,152 @@ function litGraphTitleGrams(p) {
   return litGraphTokens(String(p.title || ''));
 }
 /* 两篇之间的关联强度 + 原因清单（可核对，不猜） */
-/* sub = 是否含「硬证据」。只有 sub 为真的对才可能连线：
-   同理论 / 同分类标签 / 同刊 / 同作者 / 内容重合达标。
-   年份邻近、标题相似属于加分项，不构成连线。 */
+/* 关系判定：四类**可核对**的证据各计 1 票，按票数分级。
+   不用加权总分做分级，是因为理论 / 作者 / 期刊 / 主题是**不同性质**的关系，
+   不是同一种量的多少——「同理论」并不比「同主题」强 2 倍，加权求和的数字没有意义。
+   票数表示「有多少个独立角度都指向同一个结论」，这才可解释、可复核。
+
+   E1 理论  共享 ≥1 个理论视角标签        → 同一条概念脉络
+   E2 主题  共享 ≥1 个分类标签，或正文重合 ≥12%  → 同一议题域
+   E3 作者  有共同作者                     → 同一研究团队 / 学术谱系
+   E4 期刊  同一来源（期刊 / 会议，非空）   → 同一发表阵地
+
+   上述四项之外的年份邻近、标题相似**不投票**，只作同级别内的微调（见下）。 */
 function litGraphScore(a, b, grams, hgrams) {
-  let s = 0; const why = []; let sub = false;
+  let s = 0; const why = [], ev = [];
   const A = litTags(a, 'theoryTags'), B = litTags(b, 'theoryTags');
   const st = A.filter(function (x) { return B.indexOf(x) >= 0; });
-  if (st.length) { s += st.length * 3; sub = true; why.push('同理论 · ' + st.slice(0, 2).join('、')); }
+  if (st.length) { s += st.length * 3; ev.push('理论'); why.push('同理论 · ' + st.slice(0, 2).join('、')); }
   const C = litTags(a, 'tags'), D = litTags(b, 'tags');
   const sc = C.filter(function (x) { return D.indexOf(x) >= 0; });
-  if (sc.length) { s += sc.length * 1.5; sub = true; why.push('同标签 · ' + sc.slice(0, 2).join('、')); }
+  let topic = false;
+  if (sc.length) { s += sc.length * 1.5; topic = true; why.push('同标签 · ' + sc.slice(0, 2).join('、')); }
   const va = String(a.venue || '').trim(), vb = String(b.venue || '').trim();
-  if (va && va === vb) { s += 2; sub = true; why.push('同一期刊'); }
+  let sameVenue = false;
+  if (va && va === vb) { s += 2; sameVenue = true; why.push('同一来源'); }
   const pa = litGraphAuthors(a), pb = litGraphAuthors(b);
-  if (pa.length && pb.length && pa.some(function (x) { return pb.indexOf(x) >= 0; })) { s += 2.5; sub = true; why.push('同作者'); }
-  /* 正文内容重合：唯一能独立构成连线的文本证据。门槛 12%——
-     实测同一学科内不同主题的文献，去掉停用词后重合普遍在 3–7%（且多为
-     「文以 / 我国 / 的传」这种切在词中间的碎片），所以门槛必须明显高于噪声。
-     未达门槛的重合不计分、也不写进 why，只把数值带出去供「最接近的一对」参考。 */
-  let jc = 0;
+  let byAuthor = false;
+  if (pa.length && pb.length && pa.some(function (x) { return pb.indexOf(x) >= 0; })) { s += 2.5; byAuthor = true; why.push('同作者'); }
+  /* 正文重合：以**去停用词后**的词集重合率衡量（中文 2-gram + 英文整词）。
+     12% 是实测校准出来的门槛：同一学科内不同主题的文献普遍落在 3–7%
+     （且多为「文以 / 我国 / 的传」这种切在词中间的碎片），12% 已是噪声的近两倍。
+     注意它测的是「摘要 + 核心发现」的内容重合，不是引文关系。 */
+  let jc = 0, highText = false;
   const ga = grams[a.id], gb = grams[b.id];
   if (ga && gb && ga.size > 8 && gb.size > 8) {
     let inter = 0;
     ga.forEach(function (x) { if (gb.has(x)) inter++; });
     jc = inter / Math.min(ga.size, gb.size);
-    if (jc >= 0.12) { s += Math.min(4, jc * 14); sub = true; why.push('内容重合 ' + Math.round(jc * 100) + '%'); }
+    if (jc >= 0.12) {
+      s += Math.min(4, jc * 14); topic = true;
+      highText = jc >= 0.2;                    /* ≥20% 属「单项升级」条件之一 */
+      why.push('内容重合 ' + Math.round(jc * 100) + '%');
+    }
   }
-  /* 以下两项**只在已有硬证据时**才计分 */
-  if (sub) {
+  if (topic) ev.push('主题');
+  if (byAuthor) ev.push('作者');
+  if (sameVenue) ev.push('来源');
+
+  /* 以下两项**不投票**，只在已有证据时作同级别内的微调 */
+  if (ev.length) {
     const ya = parseInt(a.year, 10), yb = parseInt(b.year, 10);
-    if (!isNaN(ya) && !isNaN(yb) && Math.abs(ya - yb) <= 2) s += 0.8;
+    if (!isNaN(ya) && !isNaN(yb) && Math.abs(ya - yb) <= 2) { s += 0.8; why.push('年份相近'); }
     const ha = hgrams[a.id], hb = hgrams[b.id];
     if (ha && hb && ha.size > 4 && hb.size > 4) {
       let inter = 0;
       ha.forEach(function (x) { if (hb.has(x)) inter++; });
       const j = inter / Math.min(ha.size, hb.size);
-      if (j >= 0.2) { s += Math.min(1.5, j * 4); why.push('主题相近 ' + Math.round(j * 100) + '%'); }
+      if (j >= 0.2) { s += Math.min(1.5, j * 4); why.push('标题相近 ' + Math.round(j * 100) + '%'); }
     }
   }
-  return { score: s, why: why, sub: sub, jc: jc };
+
+  /* 分级：先是票数，再是两条明示的升级特例 */
+  let level = 'none';
+  if (ev.length === 1) level = (byAuthor || highText) ? 'mid' : 'weak';
+  else if (ev.length === 2) level = byAuthor ? 'strong' : 'mid';
+  else if (ev.length >= 3) level = 'strong';
+  return { score: s, why: why, ev: ev, level: level, jc: jc, sub: ev.length > 0 };
 }
 
-/* 显示用的 0–100 关联度（12 分封顶，便于横向比较） */
-function litGraphScore100(score) { return Math.round(Math.min(100, (score || 0) / 12 * 100)); }
-/* 档位用**绝对分**卡：相对分会把「一个不值得看的关联」撑成满分，看着像强关系 */
-function litGraphLevelMin(lv) { return lv === 'strong' ? 7 : (lv === 'mid' ? 4 : LIT_GRAPH_MIN); }
+/* 供清单显示的等级徽标 */
+function litGraphLvBadge(level) { return '<span class="gph-lv gph-lv-' + level + '">' + litGraphLvName(level) + '</span>'; }
+
+/* 判定准则：把规则写进产品里，使用者随时能查「为什么它们连在一起」 */
+function litGraphRulesModal() {
+  const k = function (a, b) { return '<span class="gph-rtbl-k">' + a + '</span><span class="gph-rtbl-v">' + b + '</span>'; };
+  const row = function (a, b, c) { return '<tr><td><b>' + a + '</b></td><td>' + b + '</td><td>' + c + '</td></tr>'; };
+  openModal('关联判定准则', '<div class="gph-rules">'
+    + '<h4>这张图说的是哪种「关联」</h4>'
+    + '<p>用的是<b>共现证据</b>——两篇文献在某些可核对的字段上是否重合。库内没有参考文献数据，'
+    + '所以这里<b>不是引文关系</b>（直接引用 / 文献耦合 / 共被引），那是文献计量学里最强的证据，'
+    + '等以后补上「参考文献」字段才可以算。所有判定都不调用模型，同一份库每次算出的结果完全一致。</p>'
+
+    + '<h4>一、四类证据，每类各计 1 票</h4>'
+    + '<div class="gph-rtbl">'
+    + k('理论', '共享 1 个以上理论视角标签 → 同一条概念脉络')
+    + k('主题', '共享 1 个以上分类标签，或正文（摘要＋核心发现）重合 ≥12% → 同一议题域')
+    + k('作者', '有共同作者 → 同一研究团队 / 学术谱系')
+    + k('来源', '同一期刊或会议（字段非空）→ 同一发表阵地')
+    + '</div>'
+    + '<p>同一类别只计 1 票：共享三个标签和共享一个标签属同一类证据，不重复累加。'
+    + '票数代表「有多少个独立角度都指向同一个结论」，这也是它可解释、可复核的原因。</p>'
+
+    + '<h4>二、按票数分级</h4>'
+    + '<table>'
+    + '<tr><th>级别</th><th>条件</th><th>画法</th></tr>'
+    + row('强关联', '3 票以上；或 2 票且其中一类是「作者」', '粗实线')
+    + row('明确关联', '2 票；或满足下面的单项升级', '实线')
+    + row('弱关联', '1 票', '细虚线')
+    + row('无关联', '0 票', '不画线，留作散点')
+    + '</table>'
+
+    + '<h4>三、两条单项升级，以及它们的理由</h4>'
+    + '<div class="gph-rtbl">'
+    + k('仅同作者即可升为「明确」', '同作者是学术谱系关系：同一个人或团队的研究轨迹，即便主题不同也值得留意')
+    + k('仅正文重合 20% 以上升为「明确」', '正文比标签更客观——标签由人或模型打，正文重合是文献自身的语言事实')
+    + '</div>'
+
+    + '<h4>四、不作为证据的两项</h4>'
+    + '<div class="gph-rtbl">'
+    + k('年份相近', '同一时期的库里几乎人人成立，没有区分度。只在已有证据时让关系显得更近一点')
+    + k('标题相近', '同主题的标题用词本就相似，短文本尤其容易撞词。同样只在已有证据时微调')
+    + '</div>'
+
+    + '<h4>五、怎么让这张图更有用</h4>'
+    + '<p>图的信息量取决于字段。跑过「AI 六维分析」的文献会有理论视角标签，这是最强的证据类；'
+    + '分类标签由你填，一篇可以填多个。两类都缺的文献只会以散点出现——'
+    + '不是图坏了，而是它确实与库内其他文献没有可核对的关联。</p>'
+    + '</div>', { wide: true });
+}
+/* 档位按**级别**筛，不再用分数阈值：级别本身就是「几项独立证据」的结论 */
+
 
 /* 构建图数据：节点半径按关联条数，边的粗细按强度 */
 function litGraphBuild() {
   const all = state.research.papers || [];
   const grams = {}, hgrams = {};
   all.forEach(function (p) { grams[p.id] = litGraphGrams(p); hgrams[p.id] = litGraphTitleGrams(p); });
-  const min = litGraphLevelMin(litGraphLevel);
-  /* 只收含「硬证据」且达到门槛的对。没有关联就不连线——
-     宁可只有散点，也不要拿年份、标题相似硬凑出关系。 */
+  /* 只收「至少有一项证据」的对——0 票就不连线，图上留作散点。
+     宁可只有散点，也不拿年份、标题相似硬凑关系。 */
   const raw = [];
   let bestAny = null, maxJC = 0;
   for (let i = 0; i < all.length; i++) {
     for (let j = i + 1; j < all.length; j++) {
       const r = litGraphScore(all[i], all[j], grams, hgrams);
       if (r.jc > maxJC) maxJC = r.jc;
-      if (bestAny === null || r.score > bestAny.score) bestAny = { i: i, j: j, score: r.score, why: r.why, sub: r.sub, jc: r.jc };
-      if (r.sub && r.score >= LIT_GRAPH_MIN) raw.push({ i: i, j: j, score: r.score, why: r.why });
+      if (bestAny === null || r.score > bestAny.score) bestAny = { i: i, j: j, score: r.score, why: r.why, ev: r.ev, jc: r.jc };
+      if (r.ev.length) raw.push({ i: i, j: j, score: r.score, why: r.why, ev: r.ev, level: r.level });
     }
   }
-  raw.sort(function (x, y) { return y.score - x.score; });
+  raw.sort(function (x, y) {
+    const d = litGraphLvRank(y.level) - litGraphLvRank(x.level);
+    return d || (y.score - x.score);
+  });
   litGraphState.rawN = raw.length;
   litGraphState.best = bestAny;
   litGraphState.maxJC = maxJC;
-  /* 线宽按**绝对分**换算，不再按库内最高分归一化 */
-  const links = raw.filter(function (r) { return r.score >= min; }).map(function (r) {
-    return { i: r.i, j: r.j, w: Math.max(0.24, Math.min(1, r.score / 9)), score: r.score, why: r.why };
+  const links = raw.filter(function (r) { return litGraphPass(litGraphLevel, r.level); }).map(function (r) {
+    return { i: r.i, j: r.j, w: Math.max(0.24, Math.min(1, r.score / 9)), score: r.score, why: r.why, ev: r.ev, level: r.level };
   });
   const deg = all.map(function () { return 0; });
   links.forEach(function (l) { deg[l.i]++; deg[l.j]++; });
@@ -5078,6 +5173,15 @@ function litGraphTick() {
       b.vx -= ux * f; b.vy -= uy * f;
     }
   }
+  /* 整体归中：每帧按形心偏移给**全图**加一个同样的弱推力（等效于平移整张图）。
+     只在收敛后平移一次是没用的——随后 tick 还在跑，很快就漂回去。
+     均匀推力不改变节点之间的相对位置，只保证整图始终落在画布中央。 */
+  let gsx = 0, gsy = 0;
+  n.forEach(function (p) { gsx += p.x; gsy += p.y; });
+  const gfx = (st.W / 2 - gsx / n.length) * 0.016;
+  const gfy = (st.H / 2 - gsy / n.length) * 0.016;
+  n.forEach(function (p) { p.vx += gfx; p.vy += gfy; });
+
   /* 边界也用椭圆：圆的半径取 min(W,H)，在竖屏下竖向只剩 138px，
      画布上下各空一大截。椭圆边界才能把节点摊到画布该有的范围。 */
   const RX = st.W * 0.44, RY = st.H * 0.40;
@@ -5127,6 +5231,15 @@ function litGraphSettle(iters) {
   st.alpha = 1.3;
   for (let i = 0; i < (iters || 150); i++) { litGraphTick(); st.alpha *= 0.982; }
   st.alpha = 0.32;
+  /* 收敛后整体平移一次，把节点群的形心摆到画布中心。
+     力的平衡点不一定在画布中心：孤立节点被外圈力推到上方，成团的又被互相拉住，
+     整张图会偏离中心。平移不改相对位置，只把图摆正。 */
+  if (st.nodes.length) {
+    let sx = 0, sy = 0;
+    st.nodes.forEach(function (p) { sx += p.x; sy += p.y; });
+    const dx = st.W / 2 - sx / st.nodes.length, dy = st.H / 2 - sy / st.nodes.length;
+    if (dx || dy) st.nodes.forEach(function (p) { p.x += dx; p.y += dy; });
+  }
 }
 
 function litGraphTheme() {
@@ -5217,23 +5330,32 @@ function litGraphDraw() {
   });
   const dim = function (i) { return focus >= 0 && i !== focus && !near[i]; };
 
-  /* 边：强弱用「粗细 + 深浅」双重编码 */
+  /* 边：**级别决定线型**（弱=细虚线 / 明确=实线 / 强=粗实线），分数只做同级别内的粗细微调。
+     线型是有语义的——虚线一眼就能和「确认过的关系」区分开。 */
   st.links.forEach(function (l, idx) {
     const a = n[l.i], b = n[l.j];
     const hot = idx === st.hotLink;
     const touch = focus >= 0 && (l.i === focus || l.j === focus);
+    const weak = l.level === 'weak';
     ctx.beginPath();
     ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
     if (focus >= 0 && !touch) {
-      ctx.strokeStyle = T.line; ctx.lineWidth = 0.7; ctx.globalAlpha = 0.45;
+      ctx.setLineDash([]);
+      ctx.strokeStyle = T.line; ctx.lineWidth = 0.7; ctx.globalAlpha = 0.4;
     } else if (hot) {
-      ctx.strokeStyle = T.gold; ctx.lineWidth = 1.5 + l.w * 3.6; ctx.globalAlpha = 0.95;
+      ctx.setLineDash(weak ? [5, 4] : []);
+      ctx.strokeStyle = T.gold; ctx.lineWidth = 1.6 + l.w * 3.4; ctx.globalAlpha = 0.95;
     } else {
+      const base = l.level === 'strong' ? 2.5 : (l.level === 'mid' ? 1.4 : 0.9);
+      const extra = weak ? 0.4 : 1.7;
+      ctx.setLineDash(weak ? [5, 4] : []);
       ctx.strokeStyle = T.accent;
-      ctx.lineWidth = 0.8 + l.w * 3.6;
-      ctx.globalAlpha = focus >= 0 ? (0.36 + l.w * 0.5) : (0.20 + l.w * 0.62);
+      ctx.lineWidth = base + l.w * extra;
+      ctx.globalAlpha = focus >= 0
+        ? (weak ? 0.30 : (l.level === 'mid' ? 0.44 + l.w * 0.28 : 0.55 + l.w * 0.3))
+        : (weak ? 0.34 : (l.level === 'mid' ? 0.46 + l.w * 0.3 : 0.6 + l.w * 0.3));
     }
-    ctx.stroke(); ctx.globalAlpha = 1;
+    ctx.stroke(); ctx.globalAlpha = 1; ctx.setLineDash([]);
   });
 
   /* 节点：聚类色 + 光晕 + 常显标签 */
@@ -5359,11 +5481,17 @@ function litGraphCountRender() {
   const el = document.getElementById('litGraphCount');
   if (!el) return;
   const n = litGraphState.nodes.length, m = litGraphState.links.length, tot = litGraphState.rawN || 0;
-  el.textContent = m
-    ? (n + ' 篇 · ' + m + ' 条关联' + (m < tot ? '（' + (tot - m) + ' 条已隐藏）' : ''))
-    : (tot
-      ? (n + ' 篇 · 档位 0 条 / 共 ' + tot + ' 条')
-      : (n + ' 篇 · 暂无关联'));
+  if (!m) {
+    el.textContent = tot ? (n + ' 篇 · 本档位 0 条 / 共 ' + tot + ' 条') : (n + ' 篇 · 无关联（散点）');
+    return;
+  }
+  const cnt = { strong: 0, mid: 0, weak: 0 };
+  litGraphState.links.forEach(function (l) { cnt[l.level]++; });
+  const parts = [];
+  if (cnt.strong) parts.push('强 ' + cnt.strong);
+  if (cnt.mid) parts.push('明确 ' + cnt.mid);
+  if (cnt.weak) parts.push('弱 ' + cnt.weak);
+  el.textContent = n + ' 篇 · ' + parts.join(' / ') + (m < tot ? '（另 ' + (tot - m) + ' 条已隐藏）' : '');
 }
 /* 下方的清单：选中某篇时列它的邻居，未选中时列全库最强关联 */
 function litGraphListRender() {
@@ -5374,8 +5502,11 @@ function litGraphListRender() {
   const si = litGraphSel ? n.findIndex(function (p) { return p.id === litGraphSel; }) : -1;
   let rows = st.links;
   if (si >= 0) rows = rows.filter(function (l) { return l.i === si || l.j === si; });
-  rows = rows.map(function (l) { return { w: l.w, score: l.score, a: n[l.i], b: n[l.j], why: l.why }; })
-    .sort(function (x, y) { return y.score - x.score; });
+  rows = rows.map(function (l) { return { score: l.score, level: l.level, ev: l.ev, a: n[l.i], b: n[l.j], why: l.why }; })
+    .sort(function (x, y) {
+      const d = litGraphLvRank(y.level) - litGraphLvRank(x.level);
+      return d || (y.score - x.score);
+    });
   const top = rows.slice(0, 8);
   const head = si >= 0
     ? ('与 <b>#' + n[si].no + '</b> 相关的文献' + (top.length ? '' : '：无'))
@@ -5392,11 +5523,11 @@ function litGraphListRender() {
         ? ('顺手量过：全库正文重合最高的一对也只有 <b>' + Math.round(mj * 100) + '%</b>，远低于 12% 的连线门槛——'
            + '它们确实只是各自独立的研究。<br>')
         : '';
-      box.innerHTML = '<div class="gph-list-h">暂无可确认的关联</div>'
+      box.innerHTML = '<div class="gph-list-h">四类证据一项都不成立</div>'
         + '<div class="muted" style="font-size:12px;line-height:1.7">'
-        + '这 ' + n.length + ' 篇之间没有找到硬证据，所以图上只有散点——<b>没有关联就不画线</b>。<br>' + close
-        + '想连起来，最直接的是给相关的几篇加<b>同一个分类标签</b>（同标签 +1.5 分/项），或补上相同的<b>理论视角</b>（+3 分/项）；'
-        + '同刊 +2、同作者 +2.5、内容重合 ≥15% 也算。年份邻近与标题相似只是小加分，不会单独连线。</div>';
+        + '这 ' + n.length + ' 篇之间没有任何一类证据成立，所以图上只有散点——<b>没有关联就不画线</b>。<br>' + close
+        + '想连起来，最直接的是给相关的几篇加<b>同一个分类标签</b>或补上相同的<b>理论视角</b>；'
+        + '共同作者、同一来源也算证据。年份相近与标题相近只是微调，不单独构成关联。</div>';
       return;
     }
     box.innerHTML = '<div class="gph-list-h">' + head + '</div>'
@@ -5411,9 +5542,9 @@ function litGraphListRender() {
       : ('#' + r.a.no + ' ↔ #' + r.b.no + ' ' + esc(r.a.title));
     return '<div class="gph-pair" data-action="lit-graph-node" data-id="' + (si >= 0 ? other.id : r.a.id) + '"'
       + ' title="' + esc(r.a.title) + '  ↔  ' + esc(r.b.title) + '">'
-      + '<span class="gph-pair-w">' + litGraphScore100(r.score) + '</span>'
+      + litGraphLvBadge(r.level)
       + '<span class="gph-pair-t">' + label + '</span>'
-      + '<span class="gph-pair-why">' + esc(r.why.slice(0, 2).join(' · ') || '关联') + '</span></div>';
+      + '<span class="gph-pair-why">' + esc(r.ev.join('+') + ' · ' + (r.why.slice(0, 2).join(' · ') || '关联')) + '</span></div>';
   }).join('');
 }
 
@@ -5513,6 +5644,7 @@ function renderLitGraph(all) {
     + '<div class="lit-fbar"><span class="lit-flab">视图</span><div class="insp-chips">' + litViewChipsHtml(all) + '</div></div>'
     + '<div class="gph-bar">'
     + '<span class="lit-flab">强度</span><div class="insp-chips">' + chips + '</div>'
+    + '<button class="mini-btn" data-action="lit-graph-rules" title="查看关联判定准则" style="margin-left:auto">' + ico('book') + '</button>'
     + '</div>'
     + '<div class="gph-wrap"><canvas class="gph-cv" id="litGraphCv"></canvas></div>'
     + '<div class="gph-sel" id="litGraphSel"></div>'
@@ -5521,12 +5653,16 @@ function renderLitGraph(all) {
           return '<span class="gph-legend-c"><i style="background:' + c.color + '"></i>' + esc(c.key) + ' ' + c.count + '</span>';
         }).join('') + '</div>')
       : '')
-    + '<div class="gph-legend"><span><i style="opacity:.32"></i>细线 = 弱关联</span>'
-    + '<span><i style="width:26px;height:3px"></i>粗线 = 强关联</span>'
-    + '<span>圆越大 = 关联越多</span><span>圆内数字 = 文献序号</span></div>'
-    + '<div class="gph-tip">节点是文献（数字即库内序号），连线表示两篇有联系，<b>没有关联就不画线</b>。'
-    + '<b>鼠标停在线上</b>看它们为什么相连；<b>拖动</b>可以手动摆位置；<b>点一下</b>节点高亮它的关联并列出清单；<b>双击</b>回列表打开这一篇。'
-    + '连线只认硬证据——同理论 / 同分类标签 / 同刊 / 同作者 / 内容重合 ≥15%；年份邻近与标题相似只作小加分，不会单独连线。</div>'
+    + '<div class="gph-legend"><span><i class="dash"></i>虚线 = 弱关联（1 项证据）</span>'
+    + '<span><i style="height:2px"></i>实线 = 明确关联（2 项）</span>'
+    + '<span><i style="width:26px;height:4px"></i>粗线 = 强关联（3 项以上）</span></div>'
+    + '<div class="gph-legend"><span>圆越大 = 关联越多</span><span>圆内数字 = 文献序号</span>'
+    + '<span>鼠标停在线上看依据</span></div>'
+    + '<div class="gph-tip">节点是文献，圆内数字是库内固定序号。连线只有四类可核对的依据：'
+    + '<b>同理论</b>（共享理论视角标签）、<b>同主题</b>（共享分类标签，或正文重合 ≥12%）、<b>同作者</b>、<b>同一来源</b>；'
+    + '依据越多关系越明确，一项都没有就不画线（留作散点）。'
+    + '<b>鼠标停在线上</b>看依据；<b>点一下</b>节点高亮它的关联；<b>双击</b>回列表打开这一篇。'
+    + '年份相近与标题相近只作微调，不单独构成关联。<b>判定准则 ›</b>有完整规则。</div>'
     + '<div class="gph-list" id="litGraphList"></div>'
     + '<div class="lit-foot">同一份文献库每次画出的图一样——关联是算出来的，不是猜出来的；关联不够门槛就不画线。</div></div>';
 }
@@ -7225,6 +7361,7 @@ ${exist}`);break;}
     case 'lit-goto-graph': litView='graph';saveTabPref('muan.litV',litView);renderView();break;
     case 'lit-graph-open':{const _oid=el.dataset.id||'';litView='all';saveTabPref('muan.litV',litView);litOpen=_oid;saveTabPref('muan.litOpen',litOpen);renderView();setTimeout(function(){const _e=document.querySelector('.lit-card.open');if(_e&&_e.scrollIntoView)_e.scrollIntoView({block:'center'});},80);break;}
     case 'lit-graph-level':{litGraphLevel=el.dataset.l||'mid';litGraphRefresh(true);break;}
+    case 'lit-graph-rules':{litGraphRulesModal();break;}
     case 'lit-graph-reset': litGraphReset();break;
     case 'lit-graph-node':{const _gid=el.dataset.id||'';litGraphSel=(litGraphSel===_gid?'':_gid);litGraphListRender();litGraphKick(0.45);break;}
     case 'lit-toggle':{const _id=el.dataset.id||'';litOpen=(litOpen===_id?'':_id);saveTabPref('muan.litOpen',litOpen);renderView();break;}
