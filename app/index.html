@@ -1494,6 +1494,27 @@ input:focus, select:focus, textarea:focus{
   .lit-read{grid-template-columns:1fr 1fr;gap:18px 26px}
 }
 .lit-tagline{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
+/* ===== 对照阅读 ===== */
+.cmp-head{display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap}
+.cmp-cards{display:grid;grid-template-columns:1fr;gap:8px}
+.cmp-card{background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:8px 10px;font-size:12.5px;line-height:1.6}
+.cmp-card b{color:var(--accent)}
+.cmp-card-t{font-weight:600}
+.cmp-sec{margin-top:16px;padding-top:13px;border-top:1px dashed var(--line)}
+.cmp-sec:first-of-type{border-top:0;padding-top:4px}
+.cmp-sec-h{font-size:12px;font-weight:600;color:var(--accent);letter-spacing:.6px;margin:0 0 9px}
+.cmp-grid{display:grid;grid-template-columns:1fr;gap:13px}
+.cmp-cell{border-left:2.5px solid var(--accent-soft);padding:2px 0 2px 11px;min-width:0}
+.cmp-cell-h{font-size:11px;color:var(--ink-soft);font-weight:600;margin-bottom:4px}
+.cmp-cell-b{font-size:13px;line-height:1.8}
+.cmp-cite{font-family:inherit;font-size:11.5px;line-height:1.65;word-break:break-word;display:block;background:var(--surface-2);border-radius:8px;padding:6px 8px}
+.lit-warn{margin-top:8px;font-size:11.5px;line-height:1.7;color:var(--warn);background:color-mix(in srgb,var(--warn) 10%,transparent);border:1px solid color-mix(in srgb,var(--warn) 34%,transparent);border-radius:9px;padding:7px 10px}
+@media(min-width:769px){
+  .cmp-cards{grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}
+  .cmp-grid.n2{grid-template-columns:1fr 1fr}
+  .cmp-grid.n3{grid-template-columns:1fr 1fr 1fr}
+  .cmp-grid.n4{grid-template-columns:repeat(4,1fr)}
+}
 </style>
 </head>
 <body>
@@ -4023,7 +4044,10 @@ const LIT_VIEWS=[
   ['cite','引用格式库',function(){return true;}]
 ];
 const LIT_STATUS=['待读','在读','精读中','已读','已引用'];
-const LIT_TEXT_MAX=20000;   // 单次送模型的正文上限（字），超出会截断并明确告知用户
+/* 送模型的正文按 LIT_CHUNK 分段，全读不再截断（旧版有 20000 字硬上限，会丢掉长文尾部） */
+const LIT_CHUNK=14000;      // 超过这个长度就分段读：每段单独解读后再归并，不再截断丢内容
+const LIT_CHUNK_MAX=8;      // 最多分几段（≈11 万字）
+const LIT_MERGE_SYSTEM='你是新闻传播学领域的文献精读助手。用户会把同一篇论文**分段**得到的若干组结论给你，请合并成一组最终结论，输出与输入完全相同的 JSON 结构（title/author/year/venue/abstract/findings/method/theory/gap/future/theoryTags）。规则：①只依据给定内容，不要引入任何新信息；②同一维度下的多条信息要合并、去重、按重要性排序，不要简单拼接；③分段之间若有冲突，以更具体、更有正文依据的一条为准；④保持各维度写法：abstract 2-3 句；findings 用 ①②③ 分条；gap 区分「作者自述」与「从论证结构看出」；⑤题录字段各段都为空就留空字符串。除 JSON 外不要输出任何其他文字。';
 const LIT_EXTRACT_SYSTEM='你是新闻传播学领域的文献精读助手。用户会给你一篇论文的正文（可能不完整）。请严格依据正文输出一个 JSON 对象，禁止编造正文中没有的信息；正文里确实没有的内容，字符串写「原文未涉及」，无法确定的字段留空字符串。JSON 的键固定为：title, author, year, venue, abstract, findings, method, theory, gap, future, theoryTags。含义：title 论文标题；author 作者（多位用「、」分隔）；year 四位年份；venue 期刊或会议名；abstract 用 2-3 句概括研究问题、分析路径与结论；findings 用 ①②③ 分条列出核心发现；method 研究方法与数据来源；theory 理论框架及其组合方式；gap 作者自述的局限或你能从论证结构看出的不足；future 作者提出的或可延伸的研究方向；theoryTags 理论/视角的规范术语数组（2-4 个，如 ["议程设置理论","框架理论"]）。除 JSON 外不要输出任何其他文字。';
 
 function litTags(p,k){const v=p&&p[k];if(!v)return [];const a=Array.isArray(v)?v:String(v).split(/[,，、;；|]+/);return a.map(function(s){return String(s).trim();}).filter(Boolean);}
@@ -4068,23 +4092,72 @@ async function loadPdfJs(){
   return m;
 }
 /* src 可以是 URL 字符串，也可以是 File / Blob（导入时用） */
-async function pdfExtract(src){
+
+/* ===== 全文读取 + 分段归并 + 对照阅读 ===== */
+let litLastExtract={id:'',text:''};
+const LIT_PAGE_MIN=120;   // 一页少于这么多字，判为「没有文字层」（扫描页 / 图片页）
+async function pdfExtract(src,onProgress){
   const pdfjs=await loadPdfJs();
   let opts;
   if(typeof src==='string'){opts={url:src};}
   else{const buf=await src.arrayBuffer();opts={data:new Uint8Array(buf)};}
   const doc=await pdfjs.getDocument(opts).promise;
-  let out='';
   const total=doc.numPages;
+  const pageChars=[];
+  let out='';
   for(let i=1;i<=total;i++){
     const pg=await doc.getPage(i);
     const tc=await pg.getTextContent();
-    out+=tc.items.map(function(it){return it.str;}).join('')+'\n';
-    if(out.length>LIT_TEXT_MAX+6000)break;
-    if(i>=120)break;
+    const t=tc.items.map(function(it){return it.str;}).join('');
+    pageChars.push(t.replace(/\s/g,'').length);
+    out+=t+'\n';
+    if(onProgress)onProgress(i,total);
+    if(i>=400)break;
   }
   try{doc.destroy();}catch(e){}
-  return {text:out.replace(/[ \t]+/g,' ').replace(/\n{3,}/g,'\n\n').trim(),pages:total};
+  const emptyPages=[];
+  pageChars.forEach(function(n,i){if(n<LIT_PAGE_MIN)emptyPages.push(i+1);});
+  return {text:out.replace(/[ \t]+/g,' ').replace(/\n{3,}/g,'\n\n').trim(),pages:total,pageChars:pageChars,emptyPages:emptyPages};
+}
+
+/* 单次调用 + JSON 校验 + 失败重试一次 */
+async function litSingle(userContent){
+  let lastErr='';
+  for(let attempt=0;attempt<2;attempt++){
+    const extra=attempt?'\n\n（注意：上一次你的输出不是合法 JSON。这一次只输出一个 JSON 对象，不要解释、不要 markdown 代码块、不要省略大括号。）':'';
+    let data=null;
+    try{data=await aiCall([{role:'system',content:LIT_EXTRACT_SYSTEM},{role:'user',content:userContent+extra}],true,{temperature:0.2});}
+    catch(e){lastErr=(e&&e.message)||String(e);continue;}
+    const msg=data&&data.choices&&data.choices[0]&&data.choices[0].message;
+    if(!msg||!msg.content){lastErr=(data&&data.error)||'模型未返回内容';continue;}
+    const o=parseJsonLoose(msg.content);
+    if(!o){lastErr='模型返回的不是 JSON';continue;}
+    const o2=normalizeLitObj(o);
+    const n=litDimFilled(o2);
+    if(n<4){lastErr='有效维度只有 '+n+'/6，结果不可靠';continue;}
+    return {ok:true,obj:o2};
+  }
+  return {ok:false,error:lastErr||'未知错误'};
+}
+
+/* 把各段结论合并成一组（去重、按重要性排序、冲突取更具体的一条） */
+async function litMerge(parts,base){
+  const payload=parts.map(function(p){return '【第 '+p.i+' 段结论】\n'+JSON.stringify(p.obj);}).join('\n\n');
+  let lastErr='';
+  for(let attempt=0;attempt<2;attempt++){
+    const extra=attempt?'\n\n（上一次输出不是合法 JSON。只输出一个 JSON 对象。）':'';
+    let data=null;
+    try{data=await aiCall([{role:'system',content:LIT_MERGE_SYSTEM},{role:'user',content:'论文'+(base&&base.title?('《'+base.title+'》'):'')+' 共 '+parts.length+' 段结论。\n\n'+payload+extra}],true,{temperature:0.2});}
+    catch(e){lastErr=(e&&e.message)||String(e);continue;}
+    const msg=data&&data.choices&&data.choices[0]&&data.choices[0].message;
+    if(!msg||!msg.content){lastErr='模型未返回内容';continue;}
+    const o=parseJsonLoose(msg.content);
+    if(!o){lastErr='合并结果不是 JSON';continue;}
+    const o2=normalizeLitObj(o);
+    if(litDimFilled(o2)<4){lastErr='合并后有效维度不足（'+litDimFilled(o2)+'/6）';continue;}
+    return {ok:true,obj:o2};
+  }
+  return {ok:false,error:lastErr||'合并失败'};
 }
 function parseJsonLoose(s){
   s=String(s||'').trim().replace(/^```(?:json)?/i,'').replace(/```$/,'').trim();
@@ -4110,38 +4183,46 @@ function normalizeLitObj(o){
   return out;
 }
 /* 核心解读：低温 + JSON 校验 + 失败重试一次。只有拿到 ≥4 个有效维度才算成功，绝不让残缺结果落库 */
-async function litAnalyzeCore(text,base){
+/* 全文解读：短则一次读完；长则分段全部读完再归并 —— 不再截断丢内容 */
+async function litAnalyzeCore(text,base,onStep){
   const body=String(text||'').trim();
   const chars=body.replace(/\s/g,'').length;
   if(chars<200)return {ok:false,error:'正文不足 200 字（实际 '+chars+' 字）'};
-  const clipped=body.slice(0,LIT_TEXT_MAX);
-  const head='论文'+(base&&base.title?('《'+base.title+'》'):'')+'。\n\n正文：\n';
-  let lastErr='';
-  for(let attempt=0;attempt<2;attempt++){
-    const extra=attempt?'\n\n（注意：上一次你的输出不是合法 JSON。这一次只输出一个 JSON 对象，不要解释、不要 markdown 代码块、不要省略大括号。）':'';
-    let data=null;
-    try{data=await aiCall([{role:'system',content:LIT_EXTRACT_SYSTEM},{role:'user',content:head+clipped+extra}],true,{temperature:0.2});}
-    catch(e){lastErr=(e&&e.message)||String(e);continue;}
-    const msg=data&&data.choices&&data.choices[0]&&data.choices[0].message;
-    if(!msg||!msg.content){lastErr=(data&&data.error)||'模型未返回内容';continue;}
-    const o=parseJsonLoose(msg.content);
-    if(!o){lastErr='模型返回的不是 JSON';continue;}
-    const o2=normalizeLitObj(o);
-    const n=litDimFilled(o2);
-    if(n<4){lastErr='有效维度只有 '+n+'/6，结果不可靠';continue;}
-    return {ok:true,obj:o2,chars:chars,truncated:chars>LIT_TEXT_MAX};
+  const pref='论文'+(base&&base.title?('《'+base.title+'》'):'')+'。\n\n正文：\n';
+  const chunks=[];
+  for(let i=0;i<body.length&&chunks.length<LIT_CHUNK_MAX;i+=LIT_CHUNK)chunks.push(body.slice(i,i+LIT_CHUNK));
+  if(chunks.length<=1){
+    const r=await litSingle(pref+body);
+    if(!r.ok)return {ok:false,error:r.error};
+    return {ok:true,obj:r.obj,chars:chars,chunks:1};
   }
-  return {ok:false,error:lastErr||'未知错误'};
+  const parts=[];
+  let lastErr='';
+  for(let i=0;i<chunks.length;i++){
+    if(onStep)onStep('正在读第 '+(i+1)+'/'+chunks.length+' 段…');
+    const tag='（注意：下面只是这篇论文的**第 '+(i+1)+'/'+chunks.length+' 段**，不是全文。只依据这一段能读到的内容作答；本段没提到的维度写「原文未涉及」，不要根据标题推测全文结论。）\n\n正文（第 '+(i+1)+' 段）：\n';
+    const r=await litSingle(pref+tag+chunks[i]);
+    if(r.ok)parts.push({i:i+1,obj:r.obj});
+    else lastErr=r.error;
+  }
+  if(!parts.length)return {ok:false,error:lastErr||'所有分段都没读出内容'};
+  if(parts.length===1)return {ok:true,obj:parts[0].obj,chars:chars,chunks:chunks.length};
+  if(onStep)onStep('正在把 '+parts.length+' 段结论合并…');
+  const m=await litMerge(parts,base);
+  if(!m.ok)return {ok:false,error:m.error};
+  return {ok:true,obj:m.obj,chars:chars,chunks:chunks.length};
 }
 /* 把解读结果写回一条已有文献；题录字段只补空、不覆盖用户手填 */
-async function litAnalyzeText(id,text,pages){
+async function litAnalyzeText(id,text,pages,info){
   const p=(state.research.papers||[]).filter(function(x){return x.id===id;})[0];
   if(!p){toast('找不到这篇文献','warn');return;}
   const note=document.getElementById('litAnote_'+id);
   const say=function(html){if(note)note.innerHTML=html;};
   if(!(await ensureAiCfg())){say('<span class="warn-t">还没配置模型：去「对话」页点右上角「模型」，填 API Key 与接口地址后重试。</span>');return;}
-  say('<span class="muted">正在解读…（约 10-30 秒，会先校验结果再落库）</span>');
-  const r=await litAnalyzeCore(text,{title:p.title});
+  const chars=String(text||'').replace(/\s/g,'').length;
+  const est=Math.max(1,Math.ceil(String(text||'').length/LIT_CHUNK));
+  say('<span class="muted">正在解读'+(est>1?('（正文较长，分 '+est+' 段全部读完）'):'')+'…</span>');
+  const r=await litAnalyzeCore(text,{title:p.title},function(msg){say('<span class="muted">'+esc(msg)+'</span>');});
   if(!r.ok){say('<span class="warn-t">解读未通过校验：'+esc(r.error)+'。可以重试一次，或换一段更完整的正文。</span>');return;}
   const o=r.obj;
   let n=0;
@@ -4156,10 +4237,14 @@ async function litAnalyzeText(id,text,pages){
     p.theoryTags=m.filter(function(s,i){return s&&m.indexOf(s)===i;});
   }
   if(!p.status||p.status==='待读')p.status='在读';
-  p.aiMeta={at:now(),chars:r.chars,pages:pages||0,truncated:!!r.truncated};
+  const emptyPages=(info&&info.emptyPages)||[];
+  p.aiMeta={at:now(),chars:chars,pages:pages||0,chunks:r.chunks||1,emptyPages:emptyPages};
   save();
   renderView();
-  toast('解读完成，写入 '+n+' 项'+(r.truncated?('（正文较长，取前 '+LIT_TEXT_MAX+' 字）'):''),'gold');
+  const bits=['解读完成，写入 '+n+' 项'];
+  if(r.chunks>1)bits.push('分 '+r.chunks+' 段全读');
+  toast(bits.join(' · '),'gold');
+  if(emptyPages.length)setTimeout(function(){toast('注意：第 '+emptyPages.join('、')+' 页没有文字层，这几页没参与分析','warn');},500);
 }
 /* 从已挂的 PDF 抽正文再解读；抽不到就引导改用「粘贴正文」 */
 async function litAnalyze(id){
@@ -4171,30 +4256,46 @@ async function litAnalyze(id){
   if(!p.file){say('<span class="warn-t">这篇没关联 PDF。点「粘贴正文」直接贴摘要或正文片段即可解读。</span>');return;}
   say('<span class="muted">正在解析 PDF 正文…</span>');
   let r=null;
-  try{r=await pdfExtract(litFileUrl(p.file));}
+  try{r=await pdfExtract(litFileUrl(p.file),function(i,n){say('<span class="muted">正在解析 PDF…第 '+i+'/'+n+' 页</span>');});}
   catch(e){say('<span class="warn-t">PDF 解析失败：'+esc((e&&e.message)||String(e))+'。可改用「粘贴正文」。</span>');return;}
   const chars=r.text.replace(/\s/g,'').length;
   if(chars<200){
-    say('<span class="warn-t">只提到 '+chars+' 字正文，多半是扫描版（图片型）PDF。点「粘贴正文」手动贴一段即可。</span>');
+    say('<span class="warn-t">这份 PDF 几乎没有文字层（'+r.pages+' 页只提到 '+chars+' 字），是扫描 / 图片版。点「粘贴正文」把内容贴进来即可解读。</span>');
     return;
   }
-  await litAnalyzeText(id,r.text,r.pages);
+  litLastExtract={id:id,text:r.text};
+  if(r.emptyPages.length)say('<span class="muted">已解析 '+r.pages+' 页，其中第 '+r.emptyPages.join('、')+' 页没有文字层。正在解读…</span>');
+  await litAnalyzeText(id,r.text,r.pages,{emptyPages:r.emptyPages,pageChars:r.pageChars});
 }
 let pendingPasteId='';
+/* 粘贴正文：可选与 PDF 已抽到的正文合并，用来补扫描页 */
 function litPasteModal(id){
   const p=(state.research.papers||[]).filter(function(x){return x.id===id;})[0];
   if(!p)return;
   pendingPasteId=id;
-  openModal('粘贴正文 · 六维解读','<div class="muted" style="font-size:12px;line-height:1.7;margin-bottom:8px">适合扫描版 PDF、或无附件文献。AI <b>只依据你贴进来的内容</b>解读，贴多少分析多少，不会自己编。</div><div class="muted" style="font-size:12px;margin-bottom:6px">当前文献：'+esc(p.title||'')+'</div><textarea id="m_paste" class="fld" rows="12" style="width:100%" placeholder="把摘要、引言或正文片段粘到这里（建议 500 字以上）…"></textarea><button class="btn" style="margin-top:10px" data-action="lit-paste-save">开始解读</button>');
+  const has=litLastExtract.id===id&&litLastExtract.text.length>200;
+  const miss=(p.aiMeta&&p.aiMeta.emptyPages)||[];
+  openModal('粘贴正文 · 六维解读',
+    '<div class="muted" style="font-size:12px;line-height:1.75;margin-bottom:8px">'
+    +(miss.length?('⚠️ 这篇的第 <b>'+miss.join('、')+'</b> 页是扫描图、没有文字层。把那几页的内容贴进来，再勾选下面的「合并」，就能连同已抽到的正文一起分析。'):'适合扫描版 PDF、或无附件文献。AI <b>只依据你贴进来的内容</b>解读，贴多少分析多少，不会自己编。')
+    +'</div>'
+    +'<div class="muted" style="font-size:12px;margin-bottom:6px">当前文献：'+esc(p.title||'')+'</div>'
+    +(has?('<label class="row" style="gap:8px;margin-bottom:8px;cursor:pointer;align-items:center;flex-wrap:nowrap"><input type="checkbox" id="m_pmerge" checked style="flex:none"/> <span style="font-size:12.5px">与 PDF 已抽到的正文合并（'+litLastExtract.text.replace(/\s/g,'').length+' 字）</span></label>'):'')
+    +'<textarea id="m_paste" class="fld" rows="12" style="width:100%" placeholder="把摘要、引言或正文片段粘到这里（建议 200 字以上）…"></textarea>'
+    +'<button class="btn" style="margin-top:10px" data-action="lit-paste-save">开始解读</button>');
 }
 async function litPasteSave(){
   const ta=document.getElementById('m_paste');
   const t=ta?String(ta.value||'').trim():'';
   if(t.replace(/\s/g,'').length<200){toast('内容太短，至少 200 字','warn');return;}
   const id=pendingPasteId;
+  const mg=document.getElementById('m_pmerge');
+  const merge=!!(mg&&mg.checked);
+  let text=t;
+  if(merge&&litLastExtract.id===id)text=litLastExtract.text+'\n\n'+t;
   closeModal();
   if(litOpen!==id){litOpen=id;saveTabPref('muan.litOpen',litOpen);renderView();}
-  await litAnalyzeText(id,t,0);
+  await litAnalyzeText(id,text,0,{emptyPages:[]});
 }
 function litSetStatus(id,s){
   const p=(state.research.papers||[]).filter(function(x){return x.id===id;})[0];
@@ -4325,7 +4426,7 @@ function litImportRender(){
   const btn=document.getElementById('impRunBtn');
   if(btn)btn.disabled=impBusy||!impFiles.some(function(it){return it.status==='pending';});
 }
-function paperFromImport(it,obj,path,chars,pages){
+function paperFromImport(it,obj,path,chars,pages,emptyPages,chunks){
   const o=obj||{};
   const tt=(o.theoryTags||[]).filter(Boolean);
   const has=!!(obj&&litDimFilled(o)>=4);
@@ -4346,7 +4447,7 @@ function paperFromImport(it,obj,path,chars,pages){
     theory:String(o.theory||'').trim(),
     gap:String(o.gap||'').trim(),
     future:String(o.future||'').trim(),
-    aiMeta:has?{at:now(),chars:chars,pages:pages||0,truncated:chars>LIT_TEXT_MAX}:null
+    aiMeta:has?{at:now(),chars:chars,pages:pages||0,chunks:chunks||1,emptyPages:emptyPages||[]}:null
   };
 }
 async function litImportRun(){
@@ -4377,19 +4478,20 @@ async function litImportRun(){
       }
       it.msg='解析正文…';
       litImportRender();
-      let text='',pages=0;
-      try{const px=await pdfExtract(it.file);text=px.text;pages=px.pages;}catch(e){}
+      let text='',pages=0,emptyPages=[];
+      try{const px=await pdfExtract(it.file);text=px.text;pages=px.pages;emptyPages=px.emptyPages||[];}catch(e){}
       const chars=text.replace(/\s/g,'').length;
-      let obj=null;
+      let obj=null,chunks=1;
       if(doA&&chars>=200){
         it.msg='AI 解读中…';
         litImportRender();
-        const r2=await litAnalyzeCore(text,{title:cleanPdfName(it.name)});
-        if(r2.ok)obj=r2.obj;
+        const r2=await litAnalyzeCore(text,{title:cleanPdfName(it.name)},function(msg){it.msg=msg;litImportRender();});
+        if(r2.ok){obj=r2.obj;chunks=r2.chunks||1;}
       }
-      state.research.papers.push(paperFromImport(it,obj,path,chars,pages));
+      state.research.papers.push(paperFromImport(it,obj,path,chars,pages,emptyPages,chunks));
       it.status='done';
-      it.msg=obj?('已入库 · 六维 '+litDimFilled(obj)+'/6'):('已入库 · 仅题录'+(chars<200?'（未提到正文）':''));
+      it.msg=(obj?('已入库 · 六维 '+litDimFilled(obj)+'/6'+(chunks>1?(' · 分 '+chunks+' 段全读'):'')):('已入库 · 仅题录'+(chars<200?'（未提到正文）':'')))
+        +((emptyPages&&emptyPages.length)?(' · ⚠️ 第 '+emptyPages.join('、')+' 页无文字层'):'');
       ok++;
       addXP(3);
     }catch(e){
@@ -4438,6 +4540,7 @@ function litSelBarHtml(visibleIds){
     +'<button class="btn ghost sm" data-action="lit-sel-all">'+(allPicked?'取消全选':'全选本页 '+visN+' 篇')+'</button>'
     +'<button class="btn ghost sm" data-action="lit-sel-none"'+dis+'>清空</button>'
     +'<span class="lit-selbar-sp"></span>'
+    +'<button class="btn ghost sm" data-action="cmp-open"'+((n>=2&&n<=4)?'':' disabled')+'>对照</button>'
     +'<button class="btn ghost sm" data-action="lit-sel-status"'+dis+'>改状态</button>'
     +'<button class="btn ghost sm" data-action="lit-sel-tag"'+dis+'>加标签</button>'
     +'<button class="btn ghost sm" data-action="lit-sel-cite"'+dis+'>复制引文</button>'
@@ -4500,6 +4603,75 @@ function litSelDel(){
     toast('已删除 '+n+' 篇','gold');
   });
 }
+/* ---------- 对照阅读 ---------- */
+let litCompare=[];
+function litComparePapers(){
+  const all=state.research.papers||[];
+  return litCompare.map(function(id){return all.filter(function(p){return p.id===id;})[0];}).filter(Boolean);
+}
+function litCompareOpen(){
+  const all=state.research.papers||[];
+  const ids=litSel.filter(function(id){return all.some(function(p){return p.id===id;});});
+  if(ids.length<2){toast('至少勾选 2 篇才能对照','warn');return;}
+  if(ids.length>4){toast('一次最多对照 4 篇，先取消几篇','warn');return;}
+  litCompare=ids.slice();
+  litSelOn=false;litSel=[];litOpen='';
+  renderView();
+}
+function litCompareClose(){litCompare=[];renderView();}
+function litCompareAbbr(p,i){
+  return '#'+(i+1)+' '+((String(p.author||'').split(/[,，、]/)[0]||'佚名'))+(p.year?(' '+p.year):'');
+}
+function litCompareAskAi(){
+  const ps=litComparePapers();
+  if(ps.length<2)return;
+  const lines=ps.map(function(p,i){
+    return '【文献 '+(i+1)+'】'+[p.title,p.author,p.year,p.venue].filter(Boolean).join(' | ')+'\n'
+      +LIT_DIMS.map(function(d){const v=String(p[d[0]]||'').trim();return '  · '+d[1]+'：'+(v||'（未分析）');}).join('\n')
+      +(p.note?('\n  · 我的笔记：'+String(p.note).slice(0,200)):'');
+  }).join('\n\n');
+  const q='请对下面 '+ps.length+' 篇文献做交叉对比，按四点回答：①各自的理论取向与彼此的分歧；②方法上的差异，以及各自更适合回答什么研究问题；'
+    +'③把它们的研究不足放到一起看，能拼出什么可做的题目（给 2-3 个具体选题，并说明依据）；④如果我要写文献综述，这几篇该怎么组织。'
+    +'硬性要求：只依据我给的内容作答，不要引入这些文献之外的信息；哪一项我标了「未分析」，就明确说该项缺数据、不要猜。\n\n'+lines;
+  resAiModal();
+  setTimeout(function(){resAiSend(q);},200);
+}
+function litCompareCell(p,i,key){
+  const v=String(p[key]||'').trim();
+  const body=v?((litPlaceholder(v))?('<span class="muted">'+esc(v)+'</span>'):esc(v).replace(/\n/g,'<br>')):'<span class="muted">未分析</span>';
+  return '<div class="cmp-cell"><div class="cmp-cell-h">'+esc(litCompareAbbr(p,i))+'</div><div class="cmp-cell-b">'+body+'</div></div>';
+}
+function renderLitCompare(){
+  const ps=litComparePapers();
+  if(ps.length<2){litCompare=[];return renderResearchLiterature();}
+  const cols='n'+ps.length;
+  const secs=LIT_DIMS.map(function(d){
+    return '<section class="cmp-sec"><h4 class="cmp-sec-h">'+d[1]+'</h4><div class="cmp-grid '+cols+'">'
+      +ps.map(function(p,i){return litCompareCell(p,i,d[0]);}).join('')+'</div></section>';
+  }).join('');
+  const cites='<section class="cmp-sec"><h4 class="cmp-sec-h">引用格式</h4><div class="cmp-grid '+cols+'">'
+    +ps.map(function(p,i){
+      const c=apaCite(p);
+      return '<div class="cmp-cell"><div class="cmp-cell-h">'+esc(litCompareAbbr(p,i))+'</div><div class="cmp-cell-b">'
+        +(c?('<code class="cmp-cite">'+esc(c)+'</code><span class="lit-copy" data-action="lit-copy-cite" data-id="'+p.id+'" style="display:block;margin-top:5px">复制</span>'):'<span class="muted">缺作者/标题</span>')
+        +'</div></div>';
+    }).join('')+'</div></section>';
+  const thin=ps.filter(function(p){return litDimFilled(p)<6;});
+  return '<div class="card">'
+    +'<div class="cmp-head">'
+    +'<button class="btn ghost sm" data-action="cmp-close">‹ 返回列表</button>'
+    +'<button class="btn ghost sm" data-action="cmp-ai" style="margin-left:auto">让 AI 对比这几篇</button>'
+    +'</div>'
+    +'<div class="cmp-cards">'+ps.map(function(p,i){
+        return '<div class="cmp-card"><b>#'+(i+1)+'</b> <span class="cmp-card-t">'+esc(p.title||'')+'</span>'
+          +'<div class="muted" style="font-size:11px;margin-top:3px">'+esc([p.author,p.year,p.venue].filter(Boolean).join(' · ')||'（缺题录）')+' · '+esc(p.status||'待读')+' · 六维 '+litDimFilled(p)+'/6</div></div>';
+      }).join('')+'</div>'
+    +(thin.length?('<div class="lit-empty-hint">有 '+thin.length+' 篇还没做完六维分析，对应格子显示「未分析」。先给它们跑一次「AI 六维分析」，对照会完整得多。</div>'):'')
+    +secs+cites
+    +'<div class="lit-foot">同一维度并排横看，方便比较各篇的理论取向、方法与不足；桌面上自动多栏，窄屏纵向堆叠。'
+    +'点右上「让 AI 对比这几篇」可把这六维交给 AI 做交叉分析（它会明确区分哪些项缺数据）。</div>'
+    +'</div>';
+}
 function litDimHtml(p,d){
   const v=String(p[d[0]]||'').trim();
   if(!v)return '<div class="lit-dim empty"><div class="lit-dim-h">'+d[1]+'<span class="lit-dim-tag">未分析</span></div></div>';
@@ -4544,7 +4716,8 @@ function paperItemHtml(p){
       +'<div class="lit-row"><span class="lit-flab2">原件</span><div>'+(p.file?('<a class="muted" href="'+esc(litFileUrl(p.file))+'" target="_blank" rel="noopener">'+esc(String(p.file).replace(/^data\/media\//,''))+'</a>'):('<span class="muted">未保存</span>'+(p.srcName?(' · 原始文件名 '+esc(p.srcName)):'')))+'</div></div>'
       +'</div>'
       +'<div class="lit-anote" id="litAnote_'+p.id+'"></div>'
-      +(meta?('<div class="muted" style="font-size:11px;margin-top:8px">上次解读 '+esc(litTimeStr(meta.at))+' · 依据正文 '+meta.chars+' 字'+(meta.pages?('（'+meta.pages+' 页）'):'')+(meta.truncated?(' · 正文较长，只取了前 '+LIT_TEXT_MAX+' 字'):'')+'</div>'):'')
+      +(meta?('<div class="muted" style="font-size:11px;margin-top:8px">上次解读 '+esc(litTimeStr(meta.at))+' · 依据正文 '+meta.chars+' 字'+(meta.pages?('（'+meta.pages+' 页）'):'')+(meta.chunks>1?(' · 分 '+meta.chunks+' 段全读'):'')+'</div>'):'')
+      +((meta&&meta.emptyPages&&meta.emptyPages.length)?('<div class="lit-warn">⚠️ 第 '+meta.emptyPages.join('、')+' 页没有文字层（扫描 / 图片页），这几页的内容没参与分析。点下面「粘贴正文」补上这几页即可。</div>'):'')
       +'</div>';
   }
   return '<div class="lit-card'+(open?' open':'')+(picked?' picked':'')+'">'
@@ -4572,6 +4745,7 @@ function renderLitCite(all,q){
     +'<div class="muted" style="margin-top:8px;font-size:11px">按「作者 (年份). 标题. 来源.」拼装，缺哪个字段就跳过哪个。点「复制」拿纯文本引文，可直接粘进 Word 或笔记。</div></div>';
 }
 function renderResearchLiterature(){
+  if(litCompare.length>=2)return renderLitCompare();
   const R=state.research, all=R.papers||[];
   const q=(litQ||'').toLowerCase();
   if(litView==='cite')return renderLitCite(all,q);
@@ -6255,6 +6429,9 @@ ${exist}`);break;}
     case 'lit-sel-tag-save': litSelTagSave();break;
     case 'lit-sel-cite': litSelCite();break;
     case 'lit-sel-del': litSelDel();break;
+    case 'cmp-open': litCompareOpen();break;
+    case 'cmp-close': litCompareClose();break;
+    case 'cmp-ai': litCompareAskAi();break;
     case 'lit-read': litRead(el.dataset.id);break;
     case 'lit-set-status': litSetStatus(el.dataset.id,el.dataset.s||'待读');break;
     case 'lit-import': litImportModal();break;
@@ -6596,7 +6773,7 @@ async function init(){
     const fBtn=e.target.closest('[data-form]');
     if(fBtn){e.preventDefault();handleForm(fBtn);return;}
     const el=e.target.closest('[data-action]');
-    if(el){const a=el.dataset.action;if(a.startsWith('store-')||a.startsWith('bg-')||a.startsWith('ai-')||a.startsWith('so-')||a.startsWith('cloud-')||a==='install-app'||a==='nav'||a==='nav-more'||a==='toggle-theme'||a==='set-color'||a==='set-density'||a==='course-mode'||a==='news-tab'||a==='toggle-notify'||a==='toggle-sync'||a==='sync-now'||a==='reward-draw'||a==='speak-brief'||a==='checkin-btn'||a==='close-modal'||a==='edit'||a.startsWith('add-')||a.startsWith('del')||a.startsWith('block-')||a.startsWith('todo-')||a.startsWith('step-')||a.startsWith('research-')||a.startsWith('lit-')||a.startsWith('res-ai')||a.startsWith('imp-')||a.startsWith('pdf-')||a.startsWith('jnl-')||a.startsWith('journal-')||a.startsWith('cn-')||a==='follow-journal'||a==='unfollow-journal'||a==='refresh-journals'||a==='save-as-paper'||a==='incubate-idea'||a.startsWith('course-')||a.startsWith('pay-')||a.startsWith('move')||a.startsWith('open-')||a.startsWith('reward-')||a.startsWith('save-')||a.startsWith('hw-')||a.startsWith('credit-')||a==='wk-add-row'||a==='clear-demo'||a==='export'||a==='import'||a.startsWith('import')||a==='timer'||a==='zotero-import'||a.startsWith('ach-')||a.startsWith('edit-')||a.startsWith('asset-')||a.startsWith('confirm-')||a==='test-notify'||a==='reset-progress'||a==='news-refresh'||a==='news-save'||a.startsWith('news')||a.startsWith('ms-')||a.startsWith('insp')||a.startsWith('rd')||a.startsWith('review-')||a.startsWith('done-')||a==='toggle-side'||a.startsWith('search')){handleAction(a,el);}}
+    if(el){const a=el.dataset.action;if(a.startsWith('store-')||a.startsWith('bg-')||a.startsWith('ai-')||a.startsWith('so-')||a.startsWith('cloud-')||a==='install-app'||a==='nav'||a==='nav-more'||a==='toggle-theme'||a==='set-color'||a==='set-density'||a==='course-mode'||a==='news-tab'||a==='toggle-notify'||a==='toggle-sync'||a==='sync-now'||a==='reward-draw'||a==='speak-brief'||a==='checkin-btn'||a==='close-modal'||a==='edit'||a.startsWith('add-')||a.startsWith('del')||a.startsWith('block-')||a.startsWith('todo-')||a.startsWith('step-')||a.startsWith('research-')||a.startsWith('lit-')||a.startsWith('cmp-')||a.startsWith('res-ai')||a.startsWith('imp-')||a.startsWith('pdf-')||a.startsWith('jnl-')||a.startsWith('journal-')||a.startsWith('cn-')||a==='follow-journal'||a==='unfollow-journal'||a==='refresh-journals'||a==='save-as-paper'||a==='incubate-idea'||a.startsWith('course-')||a.startsWith('pay-')||a.startsWith('move')||a.startsWith('open-')||a.startsWith('reward-')||a.startsWith('save-')||a.startsWith('hw-')||a.startsWith('credit-')||a==='wk-add-row'||a==='clear-demo'||a==='export'||a==='import'||a.startsWith('import')||a==='timer'||a==='zotero-import'||a.startsWith('ach-')||a.startsWith('edit-')||a.startsWith('asset-')||a.startsWith('confirm-')||a==='test-notify'||a==='reset-progress'||a==='news-refresh'||a==='news-save'||a.startsWith('news')||a.startsWith('ms-')||a.startsWith('insp')||a.startsWith('rd')||a.startsWith('review-')||a.startsWith('done-')||a==='toggle-side'||a.startsWith('search')){handleAction(a,el);}}
   });
   document.addEventListener('change',e=>{if(e.target.id==='import_file'){importFileRead(e.target);}
   if(e.target.dataset&&e.target.dataset.fkey){const f=e.target.dataset.fkey;const v=e.target.value;const J=state.research.journals;if(f==='cnjournal'||f==='cnyear'){J.cnMetaFilter=J.cnMetaFilter||{journal:'',year:''};J.cnMetaFilter[f]=v;save();renderView();return;}if(f==='recent'){J.filters=J.filters||{};J.filters[f]=v;save();renderView();return;}J.filters=J.filters||{};J.filters[f]=v;save();renderView();return;}if(e.target.id==='m_type')workoutDyn(e.target.value);if(e.target.id==='m_happy'){const r=50+(Math.max(1,Math.min(5,(+$('#m_happy').value)||3))-1)*25;const pr=$('#m_reward');if(pr)pr.textContent='+'+r+' 木币';}if(e.target.classList.contains('ctime')){const i=+e.target.dataset.i;if(state.courses.periods[i]!==undefined){state.courses.periods[i]=e.target.value;save();renderView();}}if(e.target.id==='set_sit'){state.settings.sitThreshold=Math.max(1,Math.min(240,(+$('#set_sit').value)||50));save();toast('已保存久坐阈值');}if(e.target.id==='set_lead'){state.settings.remindLead=Math.max(1,Math.min(120,(+$('#set_lead').value)||15));save();toast('已保存提前提醒');}if(e.target.id==='insp_img'||e.target.id==='insp_vid'){inspUpload(e.target);}if(e.target.id==='bg_file'){bgUpload(e.target);}
