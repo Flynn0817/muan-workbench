@@ -1,6 +1,6 @@
 /* 木案工作台 Service Worker：HTML 用网络优先（保证更新能到达），静态资源缓存优先；
    Supabase 的 /rest /auth 请求一律不拦截。改动本文件请同时更新 SW_VER。 */
-const SW_VER = 'muan-v19';
+const SW_VER = 'muan-v20';
 const CORE = ['/', '/index.html', '/manifest.webmanifest', '/icon-192.png', '/icon-512.png', '/apple-touch-icon.png'];
 
 self.addEventListener('install', (e) => {

@@ -309,3 +309,48 @@ io.open(p,'wb').write(raw.replace('\n','\r\n').encode('utf-8'))
 3. **改批量导入时别忘了同步**：`paperFromImport` 的 aiMeta、导入进度文案、`litAnalyzeCore` 的 onStep 回调——一处漏改就会出现「单独分析对、批量导入还是旧行为」。
 4. **沙箱脚本要先 `mkdirSync(SB)` 再 `copyFileSync`**，否则父目录不存在，复制会全部被 `try{}catch{}` 静默吞掉（表现为「服务起不来：Cannot find module server.js」）。
 5. 沙箱里跑需要模型的测试：临时把 `data/ai-config.json` 复制进沙箱，**收尾必须连同沙箱一起删掉**（里面是用户的 API Key）。同时删掉 `muan-pdfdiag` 这类 PDF 副本目录。
+
+### 10.16 大弹窗、文献序号与排序（2026-09-23 三版）
+用户反馈「科研 AI 弹窗设计过小、布局不合理，对话框要完整方便查阅；文献需要序号排序」。
+
+**① 科研 AI 弹窗改成大窗**
+- `openModal(title, html, opts)` 新增第三参数；`opts.wide` → `#modalBox` 加 `modal-lg` 类。
+  基础 `.modal` 只有 `max-width:520px`，长回答在弹窗里根本展不开。
+- `.modal.modal-lg`：桌面 `max-width:860px; height:88vh`；手机 `height:93vh`（原来 88vh 的 bottom sheet 不够）。
+  关键是 `display:flex;flex-direction:column;overflow:hidden` —— **把滚动交给内部对话区，弹窗本身不滚**。
+- `#resAiBox` / `.res-ai-modal` 逐层 `flex:1;min-height:0`，`.res-ai-log{flex:1;min-height:0}`。
+  这样对话区从写死的 `max-height:240px` 变成撑满剩余空间（桌面实测 555px 高）。
+  链条上任何一环漏了 `min-height:0`，flex 子项就不会收缩，输入框会被挤出屏幕。
+- 头部改成 `.res-ai-hd`：状态点放在副标题行 *内部*（`display:flex;align-items:center`），
+  比让点独立成列更容易对齐（独立成列时 `align-items:center` 会让它飘在两行文字中间）。
+- 空对话时提示用 `.res-ai-log>.res-ai-hint{margin:auto 0}` 垂直居中。
+- **`openModal` 只有 2 个参数，多传的第 3 个会被丢掉**——`askConfirm` 也踩过同样的坑（见 10.11），
+  项目里所有看似能接配置的老函数，改之前先 `grep` 它的真实签名。
+
+**② 文献固定序号 + 排序**
+- `litNo(id)`：按 `papers` 数组（录入顺序）返回 1-based 序号；`litSortList(list)` 按 `litSort` 排新数组。
+- 序号是**固定的**（跟着文献走），不随排序变化——这样「第 5 篇」在任何排序下都指向同一篇，
+  写笔记、与人讨论、对照视图里对号都不会错位。脚注里写明了这一点。
+- 排序方式 `LIT_SORTS = 录入顺序 / 年份 / 作者 / 状态 / 标题`；年份**重复点击翻转升降**（`litDir`），
+  chip 文案动态显示 `年份 ↓` / `年份 ↑`。
+- 排序只改展示顺序：`renderResearchLiterature` 里 filter 之后再 `list=litSortList(list)`，
+  必须在 `litVisibleIds` 之前（否则「全选本页」和实际列表不一致）。
+- 排序持久化到 `muan.litS` / `muan.litD`，与 `muan.litV` / `muan.litF` 同一套路。
+- 无年份的文献**统一排最后**（不管升序降序），别让它们霸占开头。
+- 序号占位与多选勾选框**同列切换**（非多选显示序号，多选显示 `.lit-pick`），不额外占宽度。
+- 引用格式库、对照视图（`.cmp-card` / `litCompareAbbr`）也统一用 `litNo`，
+  原来对照里用的是 `#'+(i+1)`（列表位置），换成固定序号后才能与库内其它地方对上。
+
+**③ 顺手修掉的真 bug**
+- **刷新 / 重开应用后对话看着像丢了**：记录其实一直在 `localStorage['muan.aiSessions']`，
+  但 `aiSessId` 没持久化，重载后 `chatMessages` 为空，对话页一片空白，得去历史列表点开。
+  修法：加 `aiSaveSessId()`，在 `persistActive` / `aiOpenSession` 写入，`aiStartNew` / `aiDelSession` 清除，
+  启动时按 `muan.aiSessId` 找回对应会话并回填 `chatMessages`。
+- **列表标题过长**：手机上一条标题占 4 行，一屏放不下两条。`.lit-card .body>.title` 加两行截断，
+  `.lit-card.open .body>.title` 放开；「已精读」标记从标题里移到元信息行，否则会被截断吃掉。
+
+**④ 测试提醒**
+- 排序、序号这类仅涉及展示的改动**不需要 AI**，沙箱可以只复制 `muan.db.json` + `media/`，
+  **不复制 `ai-config.json`**，收尾压力小得多。
+- 端口探测：`server.js` 遇到 8765/8766 被占会自动往上试。**收尾只停自己起的那个端口**
+  （否则会误杀用户正在用的应用，见 10.10 的教训）。
