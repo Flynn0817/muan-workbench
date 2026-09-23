@@ -171,4 +171,77 @@ io.open(p,'wb').write(raw.replace('\n','\r\n').encode('utf-8'))
 ### 9.4 若未来要让手机端全量抓取（可选方向，默认不做）
 把 `/api/hot`、`/api/journals` 移植为 Supabase 数据库函数（参照 v3 AI 通道的 RPC + pg_net 模式）或独立代理服务；同时把 1998 行写死的 `localhost:8765` 改为相对/可配置基址。**注意用户偏好克制**：热点平台保持原 5 个（学术前沿/微博/抖音/知乎/小红书），只做可靠性增强，不扩平台。
 
+## 10. 科研进程 · 文献精读（2026-09-23 增，对齐飞书多维表格）
 
+来源：用户希望把飞书「新闻传播学科研文献阅读与管理系统」的字段/视图/功能复刻进科研进程。
+复刻范围 = **字段与视图结构 + 功能与规则**（不导入数据行）。
+
+### 10.1 数据结构（`state.research.papers[]` 新增）
+| 字段 | 说明 |
+|---|---|
+| `abstract` / `findings` / `method` / `theory` / `gap` / `future` | **六维**，对应飞书的 6 个「AI 生成」列 |
+| `theoryTags` | 数组，理论视角标签（与 `tags` 分类标签是**两套独立体系**） |
+| `srcName` | 原始文件名（手机端导入不落文件时，靠它说明来历） |
+| `aiMeta` | `{at, chars, pages, truncated}` —— 上次解读的时间与依据，界面会显示 |
+
+所有渲染点必须 `||''` 兜底。**记录编号、创建人字段按用户意愿未做**（本地单人应用无意义）。
+
+### 10.2 视图（`LIT_VIEWS`，对齐飞书 5 个预设视图）
+全部文献 / 理论视角（`theoryTags` 非空 **或** `theory` 有实质内容）/ 媒介研究（`tags` 含「媒介研究」）/ 在读（`status==='在读'`）/ 引用格式库。
+与「状态」筛选并成**两行 chip**（两个概念，别混成一行）。chip 生成统一走 `litViewChipsHtml()`——
+**引用格式库视图也必须渲染视图条**，否则用户进去出不来（踩过）。
+
+### 10.3 引用格式
+`apaCite(p)` 按 APA 7 拼「作者 (年份). 标题. 来源.」，自动、不手填。
+**占位语必须清洗**：模型爱回「原文未涉及」，六维里保留它是有用信息，但题录字段
+（title/author/venue）不清掉就会拼出「原文未涉及 (2022). 标题. …」这种垃圾引文。
+判定走 `litPlaceholder()`；`normalizeLitObj()` 里统一处理。`theoryTags` 解析要**先 trim 再剥引号**。
+
+### 10.4 PDF 正文抽取（浏览器端，不是服务端）
+`vendor/pdfjs/`（pdfjs-dist 4.0.379 legacy，360KB + 1.08MB）。
+**必须走浏览器端**：手机端是静态托管、没有 server.js，只有浏览器端双端通用。
+- 新增静态资源类型要同步补 `server.js` 的 MIME 表，否则 dynamic `import('*.mjs')` 被当 octet-stream 拒绝
+- 抽不到正文 / 扫描版 PDF → **明确报错并引导「粘贴正文」**，绝不让模型凭标题猜
+- Node 端跑 pdf.js 需要 DOMMatrix/Path2D 垫片，别拿它当验证手段，直接用浏览器验
+
+### 10.5 AI 解读可靠性（四道闸，缺一不可）
+`litAnalyzeCore(text, base)`：
+1. **低温** `temperature: 0.2`（`aiCall(messages, noTools, opts)` 第三参，server.js 透传）
+2. **JSON 解析失败自动重试一次**，并附「只输出 JSON」的提醒
+3. **归一化 + 校验**：`normalizeLitObj()` 规范字段；**有效维度 < 4 项判为失败，不落库**
+4. **依据可追溯**：写 `aiMeta{at, chars, pages, truncated}`，界面显示「上次解读 … · 依据正文 N 字」
+一次调用同时产出**题录 + 六维**（省一半调用量）；题录只补空、不覆盖用户手填。
+
+### 10.6 批量导入（拖放弹窗）
+入口两处：AI 对话页输入行 📚 + 空态 chip；文献库标题「导入 PDF」。
+`litImportModal()` 弹窗含**虚线拖放区**（示意拖入位置）+ 选择文件（multiple）+ 逐条状态列表 +
+「同时做 AI 六维解读」开关。流程：上传到 `data/media/` → pdf.js 抽正文 → 一次 AI 调用 → 落库。
+- 拖放区要 `addEventListener` 绑 `dragenter/dragover/dragleave/drop`（不是 data-action，拖拽不走点击委托）
+- 手机端没有 `/api/media`：**能解读但不落文件**，`file=''` + 记 `srcName`，界面标「无原件」并提前告知
+
+### 10.7 阅读与管理
+- 内嵌 PDF 阅读器 `litRead()`：pdf.js 渲 canvas + 翻页 / 缩放 / 新标签兜底
+- 展开区有**阅读状态快捷切换**（待读/在读/精读中/已读/已引用），标「已读」自动补进度 100%
+- 删除走已有 `delColl`，但提示语要说明**附件不会一起删**，之后可在设置里用「无引用附件」清理
+
+### 10.8 全局 AI 与科研 AI 互通
+**同一条对话**：科研面板不再有独立 `resAiMsgs` / `RES_AI_SYSTEM` / `buildResContext`。
+- 共用 `chatMessages` + `aiSessId` + `AI_TOOLS` + `buildAiContext()`
+- `buildAiContext()` 里并入 `litContextBlock()`（文献库明细 + 研究问题 / 里程碑 / 在途稿件）
+- **`aiRender()` 末尾必须调 `resAiRender()`**：原来 `#aiMsgs` 不存在就 `return`，
+  导致在科研页发消息时面板不刷新
+- 科研面板发送走 `resAiSend()`（复用 `aiRun()`），不另写一套
+
+### 10.9 设置里的文献存储
+「我的 → 存储与清理」新增「📚 科研文献附件」一行：文献数 / 有原件数 + 「打开附件目录」。
+`server.js` 新增 `POST /api/open-folder {which}`，**只放行 media / data / backups 三个目录**
+（白名单在服务端再校验一次，实测 `../../Windows` 被拒），Windows 走 `explorer`、macOS `open`、Linux `xdg-open`。
+
+### 10.10 本次踩坑（务必记住）
+1. **`data-action` 点击白名单是硬编码前缀匹配**。本次新增动作必须同时补前缀
+   （已加 `lit-` `res-ai` `imp-` `pdf-`），否则点击**静默失效、零报错**。
+2. **同名注释会坑正则**：CSS 里有一条 `/* ===== 文献精读（对齐飞书…`，JS 里也有一条。
+   用正则整段替换时锚点必须带够区分度（JS 那条含「的字段与视图」），否则会从 CSS 一路吞到 JS。
+3. **`aiCfgOk` 只在访问过「对话」页后才赋值** → 非 AI 页要用模型前先 `await ensureAiCfg()`。
+4. 验证手段：白名单覆盖**不要手敲前缀列表**（必漏），要从源码抽出那串条件表达式
+   `new vm.Script('(a)=>('+expr+')').runInNewContext({})` 编译成判定函数再逐条验。

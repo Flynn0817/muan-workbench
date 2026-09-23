@@ -2,6 +2,8 @@
 
 一个**单文件驱动的个人工作台**：待办 / 时间规划 / 课程 / 运动 / 学习目标 / 科研文献 / 收支 / 时事热点 / AI 对话 / 成就激励。电脑与手机双端共用一份代码，可选用 Supabase 云同步让两端数据互通。
 
+**科研文献精读**：把 PDF 拖进「导入文献」弹窗（可批量），自动抽取正文并让 AI 生成**题录 + 六维解读**（摘要 / 核心发现 / 研究方法 / 理论视角 / 研究不足 / 未来研究方向），支持内嵌阅读、阅读状态跟踪、APA 7 引用格式一键复制；文献库与 AI 对话页共用同一条对话。
+
 仓库结构：
 
 ```
@@ -9,10 +11,12 @@ muan-workbench/
 ├── app/                      工作台本体（可直接运行，也可整体作为手机端静态站点发布）
 │   ├── index.html            单文件应用（CSS/HTML/JS 全内联）
 │   ├── server.js             电脑端本地服务（端口 8765）
+│   ├── vendor/pdfjs/         PDF 正文抽取（浏览器端，离线可用）
+│   ├── data/                 4 张预置背景图（运行时会自动建 media/ 存附件）
 │   ├── sw.js / manifest.webmanifest / icon-*.png / *.svg   PWA 资产
 ├── start-muan.bat            Windows 一键启动
 ├── start-muan.sh             macOS / Linux 一键启动
-├── skills/muan-workbench/    AI 维护 skill（含用户指南 §8、抓取指南 §9）
+├── skills/muan-workbench/    AI 维护 skill（含用户指南 §8、抓取指南 §9、文献精读 §10）
 │   └── references/           Supabase 建表 SQL
 └── LICENSE
 ```

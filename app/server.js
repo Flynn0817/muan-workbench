@@ -128,7 +128,9 @@ function sendJSON(res, code, obj, extraHeaders) {
 const MIME = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
+  '.pdf': 'application/pdf',
   '.svg': 'image/svg+xml',
   '.ico': 'image/x-icon',
   '.png': 'image/png',
@@ -503,6 +505,7 @@ async function aiChatProxy(req, res) {
   const url = cfg.baseURL.replace(/\/+$/, '') + '/chat/completions';
   const payload = { model: cfg.model || 'deepseek-chat', messages: messages, stream: false };
   if (Array.isArray(tools) && tools.length) payload.tools = tools;
+  if (body.temperature != null) payload.temperature = body.temperature;
   const ac = new AbortController(); const timer = setTimeout(() => ac.abort(), 120000);
   try {
     const r = await fetch(url, {
@@ -638,6 +641,21 @@ async function handleRequest(req, res) {
       } catch (e) {
         sendJSON(res, 500, { ok: false, error: String(e && e.message || e) });
       }
+      return;
+    }
+    /* 打开本机目录：只放行白名单内的目录，不接受任意路径 */
+    if (p === '/api/open-folder' && req.method === 'POST') {
+      let o; try { o = JSON.parse(await readBody(req)); } catch (e) { sendJSON(res, 400, { ok: false, error: 'bad json' }); return; }
+      const MAP = { media: MEDIA_DIR, data: DATA_DIR, backups: BACKUP_DIR };
+      const dir = MAP[String((o && o.which) || 'media')];
+      if (!dir) { sendJSON(res, 400, { ok: false, error: '只允许 media / data / backups' }); return; }
+      try { fs.mkdirSync(dir, { recursive: true }); } catch (e) {}
+      const plat = process.platform;
+      const cmd = plat === 'win32' ? ('explorer "' + dir + '"')
+        : plat === 'darwin' ? ('open "' + dir + '"')
+        : ('xdg-open "' + dir + '"');
+      try { exec(cmd); sendJSON(res, 200, { ok: true, path: dir }); }
+      catch (e) { sendJSON(res, 500, { ok: false, error: String(e && e.message || e) }); }
       return;
     }
     if (p === '/api/media' && req.method === 'POST') {
